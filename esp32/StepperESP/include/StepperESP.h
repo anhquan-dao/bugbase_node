@@ -58,6 +58,7 @@ class StepperESP{
 
         void getEncoderSpeed();
         void setSpeed(int16_t speed0, int16_t speed1);
+        void setAcceleration(int16_t accel0, int16_t accel1);
         void setDirection(boolean dir0, boolean dir1);
         void motorControl();
         void recvWithStartEndMarkers();
@@ -69,7 +70,7 @@ class StepperESP{
 
         volatile int16_t tick_speed[2] = {0,0};
         volatile int64_t tick_count[2] = {0,0};
-        float dt = 100; //microseconds
+        float dt = 50; //microseconds
 
 };
 

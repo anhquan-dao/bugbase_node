@@ -13,6 +13,14 @@ import threading
 
 from bugbase_driver import ESP32BugBase
 
+WRITETEST = False
+READTEST = False
+
+HALF_DUPLEX = 1
+FULL_DUPLEX = 2
+
+SELFTEST = False
+
 #=========================================================================
 class BugBaseEncoder:
 	def __init__(self, base_width, ticks_per_meter, left_enc_inverted, right_enc_inverted):
@@ -100,45 +108,57 @@ class Node:
 
 		yaw_offset = rospy.get_param("~yaw_offset", 0)
 
-		# TODO
-		# Add left_inverted and right_inverted configuration
-
 		self.bugbase = ESP32BugBase(port_name, baud_rate, timeout,\
-								  base_width, ticks_per_meter, left_inverted, right_inverted)
+								  base_width, ticks_per_meter, left_inverted, right_inverted,\
+								  acceleration)
 
 		if not self.bugbase.connect():
 			rospy.logfatal("Could not connect to ESP32 board")
 			rospy.signal_shutdown("Could not connect to ESP32 board")
 
-		rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback)
+
+		self.bugbase.setAcceleration(acceleration)
+		rospy.loginfo("Setting motor's acceleration to " + str(acceleration) + " ticks/second^2")
+		time.sleep(1)
+
+
+		rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback, queue_size=1)
 
 		odom_topic = rospy.get_param("~odom_topic", "/odometry/wheel")
 		self.odom_publisher = rospy.Publisher(odom_topic, Odometry, queue_size=1)
 
 		self.encoderOdom = BugBaseEncoder(base_width, ticks_per_meter, left_enc_inverted, right_enc_inverted)
 
+		self.mutex = threading.Lock()
+
+		self.async_mode = FULL_DUPLEX
+
+		self.vr_ticks, self.vl_ticks = 0, 0
+
 	def run(self):
 		rospy.loginfo("Starting motor driver")
-		rate = rospy.Rate(10)
+		rate = rospy.Rate(50)
 
 		while not rospy.is_shutdown():
 			speed1, speed2 = 0, 0
 
-			speed1, speed2 = self.bugbase.readSpeed()
+			if not WRITETEST:
 
-			# Convert 2bytes signed to 4bytes signed
-			if(speed1 & 0x8000): 
-				speed1 = -0x10000 + speed1
-			if(speed2 & 0x8000): 
-				speed2 = -0x10000 + speed2
-
-			
-			self.odom_publisher.publish(self.encoderOdom.calculate_odom(speed1, speed2))
-			
-			# rospy.loginfo(str(speed1) + " " + str(-speed2))
-
-			# TODO
-			# add inverted wheel speed configuration
+				with self.mutex:
+					speed1, speed2 = self.bugbase.readSpeed()
+					if(speed1 == 0x10000):
+						rospy.logwarn("Encoder Message Counter Fail")
+						speed1, speed2 = 0x0000, 0x0000
+					
+					
+					self.odom_publisher.publish(self.encoderOdom.calculate_odom(speed1, speed2))
+					
+					if SELFTEST:
+						self.vr_ticks, self.vl_ticks = np.random.randint(-7500, 7500), np.random.randint(-7500, 7500)
+						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+					elif self.async_mode == HALF_DUPLEX:
+						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+					# rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 
 			rate.sleep()
 
@@ -146,9 +166,17 @@ class Node:
 	def cmd_callback(self, data):
 
 		try:
-			vr_ticks, vl_ticks = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
-			# rospy.loginfo("{} {}".format(hex(vr_ticks), hex(vl_ticks)))
-			self.bugbase.setSpeed(vr_ticks, vl_ticks)
+			if not READTEST:
+				with self.mutex:
+					self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
+					# rospy.loginfo("Set Stepper Speed: " + str(vr_ticks) + "  " + str(vl_ticks))
+					# rospy.loginfo("{} {}".format(hex(vr_ticks), hex(vl_ticks)))
+					if not SELFTEST and self.async_mode == FULL_DUPLEX:
+						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+			if WRITETEST:
+				# self.bugbase.setAcceleration(7500)
+				pass
+
 		except OSError as e:
 			rospy.logwarn(e.errno)
 		

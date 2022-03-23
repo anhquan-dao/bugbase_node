@@ -1,0 +1,38 @@
+<launch>
+	<node pkg="bugbase_node" type="bugbase_node.py" name="stepper_diff_wheeled" output="screen">
+    <rosparam>
+      port: '/dev/ttyUSB0'
+      baudrate: 115200
+      timeout: 0.1
+      wheel_base: 0.4948
+      steps_per_meter: 4904.7 
+      left_inverted: false
+      right_inverted: true
+      left_enc_inverted: true
+      right_enc_inverted: true
+      acceleration: 15000
+    </rosparam>
+	</node>
+
+  <arg name="joy_dev" default="/dev/input/js0" />
+  <arg name="joy_topic" default="joy" />
+  
+  <node pkg="joy" type="joy_node" name="joy_node">
+    <param name="dev" value="$(arg joy_dev)" />
+    <param name="deadzone" value="0.3" />
+    <param name="autorepeat_rate" value="10" />
+    <remap from="joy" to="$(arg joy_topic)" />
+  </node>
+
+  <node pkg="teleop_twist_joy" name="teleop_twist_joy" type="teleop_node">
+    <param name="enable_button" value="8"/>
+    <param name="enable_turbo_button" value="9"/>
+    <param name="axis_angular" value="2"/>
+    <param name="scale_linear"  value="1.0"/>
+    <param name="scale_angular" value="0.5"/>
+    <param name="scale_linear_turbo" value="1.0"/>
+    <param name="scale_angular_turbo" value="0.5"/>
+    <remap from="joy" to="$(arg joy_topic)" />
+  </node>
+
+</launch>
