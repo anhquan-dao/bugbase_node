@@ -43,8 +43,8 @@ void StepperESP::initialize(){
 	stepper[0] = engine.stepperConnectToPin(clk_pin[0]);
 	stepper[0]->setDirectionPin(dir_pin[0]);
 	stepper[0]->setEnablePin(enable_pin);
-	// stepper[0]->setAutoEnable(true);
-	// stepper[0]->setDelayToDisable(10000);
+	stepper[0]->setAutoEnable(true);
+	stepper[0]->setDelayToDisable(10000);
 	stepper[0]->setAcceleration(7500);
 	stepper[0]->setSpeedInHz(0);
 	stepper[0]->runForward();
@@ -52,13 +52,13 @@ void StepperESP::initialize(){
 	stepper[1] = engine.stepperConnectToPin(clk_pin[1]);
 	stepper[1]->setDirectionPin(dir_pin[1]);
 	stepper[1]->setEnablePin(enable_pin);
-	// stepper[1]->setAutoEnable(true);
-	// stepper[1]->setDelayToDisable(10000);
+	stepper[1]->setAutoEnable(true);
+	stepper[1]->setDelayToDisable(10000);
 	stepper[1]->setAcceleration(7500);
 	stepper[1]->setSpeedInHz(0);
 	stepper[1]->runForward();
 
-	digitalWrite(enable_pin, LOW);
+	// digitalWrite(enable_pin, LOW);
 
 	/* Attach pins to encoders */
 	EncoderRTOS::useInternalWeakPullResistors=UP;
@@ -76,7 +76,7 @@ void StepperESP::getEncoderSpeed(){
 	encoder[1].clearCount();
 }
 void StepperESP::setSpeed(int16_t speed0, int16_t speed1){
-	setDirection(speed1>0, speed0>0);
+	setDirection(speed0>0, speed1>0);
 
 	if(abs(speed0) < 20) stepper[0]->stopMove();
 	else stepper[0]->setSpeedInHz(abs(speed0));

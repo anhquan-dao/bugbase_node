@@ -70,7 +70,7 @@ class StepperESP{
 
         volatile int16_t tick_speed[2] = {0,0};
         volatile int64_t tick_count[2] = {0,0};
-        float dt = 50; //microseconds
+        float dt = 10; //microseconds
 
 };
 

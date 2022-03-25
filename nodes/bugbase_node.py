@@ -50,6 +50,12 @@ class BugBaseEncoder:
 		self.left_enc_inverted = left_enc_inverted
 		self.right_enc_inverted = right_enc_inverted
 
+	def normalize_angle(self, angle):
+		while angle > np.pi:
+			angle -= 2.0 * np.pi
+		while angle < -np.pi:
+			angle += 2.0 * np.pi
+		return angle
 	
 	def calculate_odom(self, vl_enc, vr_enc):
 		if self.right_enc_inverted:
@@ -64,11 +70,21 @@ class BugBaseEncoder:
 		dt = current_time - self.last_enc_time
 
 		linear_vel = (vr_enc + vl_enc)/(self.TICKS_PER_METER * 2.0)
-		angular_vel = (vr_enc - vl_enc)/(self.TICKS_PER_METER * self.BASE_WIDTH)
+		angular_vel = (-vr_enc + vl_enc)/(self.TICKS_PER_METER * self.BASE_WIDTH)
 
-		self.current_x += (linear_vel * np.cos(angular_vel)) * dt
-		self.current_y += (linear_vel * np.sin(angular_vel)) * dt
-		self.current_theta += angular_vel * dt
+		if angular_vel == 0:
+			self.current_x += linear_vel*np.cos(self.current_theta)*dt
+			self.current_y += linear_vel*np.sin(self.current_theta)*dt
+		else:
+			r = linear_vel/angular_vel
+
+			self.current_theta += angular_vel * dt
+			self.current_theta = self.normalize_angle(self.current_theta)
+
+			self.current_x += r*(np.sin(self.current_theta) - np.sin(self.current_theta - angular_vel*dt))
+			self.current_y -= r*(np.cos(self.current_theta) - np.cos(self.current_theta - angular_vel*dt))
+		
+		
 		odom_quat_orientation = ros_tf.transformations.quaternion_from_euler(\
 							0, 0, self.current_theta)
 
@@ -131,13 +147,12 @@ class Node:
 
 		self.mutex = threading.Lock()
 
-		self.async_mode = FULL_DUPLEX
+		self.async_mode = HALF_DUPLEX
 
 		self.vr_ticks, self.vl_ticks = 0, 0
 
 	def run(self):
 		rospy.loginfo("Starting motor driver")
-		rate = rospy.Rate(50)
 
 		while not rospy.is_shutdown():
 			speed1, speed2 = 0, 0
@@ -160,8 +175,6 @@ class Node:
 						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 					# rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 
-			rate.sleep()
-
 		
 	def cmd_callback(self, data):
 
@@ -169,7 +182,7 @@ class Node:
 			if not READTEST:
 				with self.mutex:
 					self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
-					# rospy.loginfo("Set Stepper Speed: " + str(vr_ticks) + "  " + str(vl_ticks))
+					# rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
 					# rospy.loginfo("{} {}".format(hex(vr_ticks), hex(vl_ticks)))
 					if not SELFTEST and self.async_mode == FULL_DUPLEX:
 						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)

@@ -98,10 +98,10 @@ class ESP32BugBase:
 		
 		# print(self.speed_msg_cnt&0xff)
 		self.writelong(self.Cmd.SETSPEED, self.speed_msg_cnt,\
-										  (vl_ticks>>8)&0xff,\
-										  (vl_ticks&0xff),\
 										  (vr_ticks>>8)&0xff,\
-										  (vr_ticks&0xff))
+										  (vr_ticks&0xff),\
+										  (vl_ticks>>8)&0xff,\
+										  (vl_ticks&0xff))
 		self.speed_msg_cnt += 1
 	
 	def setAcceleration(self, acceleration):
@@ -169,12 +169,13 @@ class ESP32BugBase:
 		return 0x0000, 0x0000
 	
 	def inv_kinematics(self, linear_x, angular_z):
-		vr = linear_x + angular_z * self.BASE_WIDTH/2.0
-		vl = linear_x - angular_z * self.BASE_WIDTH/2.0
+		vr = linear_x + angular_z * self.BASE_WIDTH / 2.0
+		vl = linear_x - angular_z * self.BASE_WIDTH / 2.0
 
 		vr_ticks = int(vr * self.TICKS_PER_METER)
 		vl_ticks = int(vl * self.TICKS_PER_METER)
 		
+		# print(str(vr_ticks) + " " + str(vl_ticks))
 		if self.RIGHT_INVERTED:
 			vr_ticks = -vr_ticks
 		if self.LEFT_INVERTED:

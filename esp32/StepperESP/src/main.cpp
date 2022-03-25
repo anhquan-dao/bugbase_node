@@ -106,9 +106,9 @@ void setSpeed(){
 	/* Selftest section */
 
 	#ifdef READ_TEST
-		Serial.print(*speed_2, HEX);
+		Serial.print(*speed_1);
 		Serial.print(" ");
-		Serial.print(*speed_1, HEX);
+		Serial.print(*speed_2);
 		Serial.print(" ");
 	#endif
 }
