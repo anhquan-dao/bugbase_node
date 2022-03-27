@@ -34,6 +34,7 @@ void motor_control_task(void* pvParameters);
 void encoder_read_task(void* pvParameters);
 void setSpeed();
 void setAcceleration();
+void setAccelerationMode();
 
 void setup(){
   Serial.begin(115200);
@@ -70,18 +71,20 @@ int8_t cmd = 0;
 
 void loop() {
 	int haha = Serial.available();
-	if(haha>=7){
+	if(haha>=9){
+		// Serial.print("Serial buffer length: ");
 		// Serial.println(haha);
 		cmd = Serial.read();
 		if(cmd == 0x4D)
 			cmd = Serial.read();
 			if(cmd == 0x01)
 				setSpeed();	
-		if(cmd == 0x55)
-			cmd = Serial.read();
-			if(cmd == 0x67)
-				setAcceleration();	
+			else if(cmd == 0x67)
+				setAcceleration();
+			else if(cmd == 0x89)
+				setAccelerationMode();		
 	}
+	delay(5);
 }
 
 void setSpeed(){
@@ -91,28 +94,67 @@ void setSpeed(){
 	}
 	else{
 		speed_msg_error += 1;
+		// Serial.println("ERROR!!");
 	}
-	static int8_t data[4];
+	int8_t data[4];
 	for(int i = 3; i >= 0; i--){
 		// Serial.read();
 		data[i] = Serial.read();
 	}
-	Serial.println();
-	static int16_t *speed_1, *speed_2;
-	speed_1 = (int16_t *)(&data[0]);
-	speed_2 = (int16_t *)(&data[2]);
+
+	int16_t *speed_1, *speed_2;
+	speed_1 = (int16_t *)(&data[2]);
+	speed_2 = (int16_t *)(&data[0]);
+
 	stepper.setSpeed(*speed_1, *speed_2);
+
+	// if(*accel_mode == 2){
+	// 	stepper.setAcceleration(10000,10000);
+	// }
+	// else if(*accel_mode == 1){
+	// 	stepper.setAcceleration(7500,7500);
+	// }
+	// else{
+	// 	stepper.setAcceleration(5000,5000);
+	// }
 
 	/* Selftest section */
 
 	#ifdef READ_TEST
-		Serial.print(*speed_1);
-		Serial.print(" ");
-		Serial.print(*speed_2);
-		Serial.print(" ");
+		// Serial.print("Motor Speed: ");
+		// Serial.print(*speed_1);
+		// Serial.print(" ");
+		// Serial.print(*speed_2);
+		// Serial.print(" Accel mode: ");
+		// Serial.println(stepper.accel_mode);
 	#endif
 }
 
+// void setAccelerationMode(){
+// 	Serial.read();
+
+// 	int8_t data[4];
+// 	for(int i = 3; i >= 0; i--){
+// 		data[i] = Serial.read();
+// 	}
+// 	int16_t *accel_mode;
+// 	accel_mode = (int16_t *)(&data[2]);
+// 	if(*accel_mode == 2){
+// 		stepper.setAcceleration(10000,10000);
+// 	}
+// 	else if(*accel_mode == 1){
+// 		stepper.setAcceleration(7500,7500);
+// 	}
+// 	else{
+// 		stepper.setAcceleration(5000,5000);
+// 	}
+
+// 	#ifdef READ_TEST
+// 		Serial.print("Acceleration mode: ");
+// 		Serial.println(*accel_mode);
+// 	#endif
+
+// }
 void setAcceleration(){
 	uint8_t new_msg_cnt = Serial.read();
 	if(new_msg_cnt == (accel_msg_cnt+1)){
@@ -126,7 +168,7 @@ void setAcceleration(){
 	for(int i = 3; i >= 0; i--){
 		data[i] = Serial.read();
 	}
-	static int16_t *accel0, *accel1;
+	int16_t *accel0, *accel1;
 	accel0 = (int16_t *)(&data[0]);
 	accel1 = (int16_t *)(&data[2]);
 	stepper.setAcceleration(*accel0, *accel1);
@@ -134,9 +176,10 @@ void setAcceleration(){
 	/* Selftest section */
 
 	#ifdef READ_TEST
-		Serial.print(*accel0, HEX);
+		Serial.print("Acceleration: ");
+		Serial.print(*accel0);
 		Serial.print(" ");
-		Serial.print(*accel1, HEX);
+		Serial.print(*accel1);
 		Serial.println();
 	#endif
 }

@@ -147,12 +147,15 @@ class Node:
 
 		self.mutex = threading.Lock()
 
-		self.async_mode = HALF_DUPLEX
+		self.async_mode = FULL_DUPLEX
 
 		self.vr_ticks, self.vl_ticks = 0, 0
+		self.accel_mode = 0
 
 	def run(self):
 		rospy.loginfo("Starting motor driver")
+
+		rate = rospy.Rate(50)
 
 		while not rospy.is_shutdown():
 			speed1, speed2 = 0, 0
@@ -174,18 +177,19 @@ class Node:
 					elif self.async_mode == HALF_DUPLEX:
 						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 					# rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
-
+			
+			rate.sleep()
 		
 	def cmd_callback(self, data):
 
 		try:
 			if not READTEST:
 				with self.mutex:
-					self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
+					self.vr_ticks, self.vl_ticks, self.accel_mode = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
 					# rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
-					# rospy.loginfo("{} {}".format(hex(vr_ticks), hex(vl_ticks)))
 					if not SELFTEST and self.async_mode == FULL_DUPLEX:
 						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+		
 			if WRITETEST:
 				# self.bugbase.setAcceleration(7500)
 				pass

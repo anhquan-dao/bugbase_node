@@ -43,6 +43,8 @@ class StepperESP{
         uint8_t dir_pin[2];
 
         uint8_t encoderA[2], encoderB[2];
+
+        uint16_t acceleration_val[3] = {5000, 7500, 10000};
         
 
     public:
@@ -58,6 +60,7 @@ class StepperESP{
 
         void getEncoderSpeed();
         void setSpeed(int16_t speed0, int16_t speed1);
+        uint8_t SetAccelerationMode(int16_t speed, FastAccelStepper *stepper);
         void setAcceleration(int16_t accel0, int16_t accel1);
         void setDirection(boolean dir0, boolean dir1);
         void motorControl();
@@ -70,7 +73,10 @@ class StepperESP{
 
         volatile int16_t tick_speed[2] = {0,0};
         volatile int64_t tick_count[2] = {0,0};
-        float dt = 10; //microseconds
+
+        uint8_t accel_mode;
+        bool brake_flag = false;
+        float dt = 50; //microseconds
 
 };
 

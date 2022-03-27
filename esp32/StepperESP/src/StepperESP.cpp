@@ -43,8 +43,8 @@ void StepperESP::initialize(){
 	stepper[0] = engine.stepperConnectToPin(clk_pin[0]);
 	stepper[0]->setDirectionPin(dir_pin[0]);
 	stepper[0]->setEnablePin(enable_pin);
-	stepper[0]->setAutoEnable(true);
-	stepper[0]->setDelayToDisable(10000);
+	// stepper[0]->setAutoEnable(true);
+	// stepper[0]->setDelayToDisable(10000);
 	stepper[0]->setAcceleration(7500);
 	stepper[0]->setSpeedInHz(0);
 	stepper[0]->runForward();
@@ -52,13 +52,13 @@ void StepperESP::initialize(){
 	stepper[1] = engine.stepperConnectToPin(clk_pin[1]);
 	stepper[1]->setDirectionPin(dir_pin[1]);
 	stepper[1]->setEnablePin(enable_pin);
-	stepper[1]->setAutoEnable(true);
-	stepper[1]->setDelayToDisable(10000);
+	// stepper[1]->setAutoEnable(true);
+	// stepper[1]->setDelayToDisable(10000);
 	stepper[1]->setAcceleration(7500);
 	stepper[1]->setSpeedInHz(0);
 	stepper[1]->runForward();
 
-	// digitalWrite(enable_pin, LOW);
+	digitalWrite(enable_pin, LOW);
 
 	/* Attach pins to encoders */
 	EncoderRTOS::useInternalWeakPullResistors=UP;
@@ -76,13 +76,62 @@ void StepperESP::getEncoderSpeed(){
 	encoder[1].clearCount();
 }
 void StepperESP::setSpeed(int16_t speed0, int16_t speed1){
-	setDirection(speed0>0, speed1>0);
 
+	static long accel0, accel1;
+	// Avoid step commands that are too small
+	setDirection(speed0>0, speed1>0);
 	if(abs(speed0) < 20) stepper[0]->stopMove();
 	else stepper[0]->setSpeedInHz(abs(speed0));
 	
 	if(abs(speed1) < 20) stepper[1]->stopMove();
 	else stepper[1]->setSpeedInHz(abs(speed1));
+
+	
+	uint8_t accel_mode0 = SetAccelerationMode(speed0, stepper[0]);
+	uint8_t accel_mode1 = SetAccelerationMode(speed1, stepper[1]);
+
+	accel_mode = min(accel_mode0, accel_mode1);
+ 
+
+
+	if(accel_mode == 2){
+		if(brake_flag == false){
+			accel0 = stepper[0]->getCurrentSpeedInMilliHz()/80;
+			accel1 = stepper[1]->getCurrentSpeedInMilliHz()/80;
+			brake_flag = true;
+		}
+		Serial.print(accel0);
+		Serial.print(" ");
+		Serial.println(accel1);
+		setAcceleration(abs(accel0), abs(accel1));
+	}
+	else{
+		setAcceleration(acceleration_val[accel_mode], acceleration_val[accel_mode]);
+		brake_flag = false;
+	}
+	
+}
+uint8_t StepperESP::SetAccelerationMode(int16_t speed, FastAccelStepper *stepper){
+	// Determine "Speed Scenario" and appropriate accel/decel value
+	if(stepper->getCurrentSpeedInUs() == 0){
+		return 0;
+	}
+	if(speed != 0){
+		bool positive = speed/stepper->getCurrentSpeedInUs() >= 0;
+		double gain = (speed*1000.0)/stepper->getCurrentSpeedInMilliHz();
+		if(!positive){
+			return 1;
+		}
+		else if(gain >= 1){
+			return 0;
+		}
+		else{
+			return 1;
+		}
+	}
+	else{
+		return 2;
+	}
 }
 void StepperESP::setAcceleration(int16_t accel0, int16_t accel1){
 	stepper[0]->setAcceleration(accel0);

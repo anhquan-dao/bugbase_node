@@ -7,6 +7,9 @@ import time
 from datetime import datetime
 
 
+NORMAL_MODE = 0
+DECEL_MODE = 1
+BRAKE_MODE = 2
 
 class ESP32BugBase:
 
@@ -30,12 +33,18 @@ class ESP32BugBase:
 		self.first_encoder_msg = True
 
 		self.error_count = 0
+		
+		# Differentiate acceleration and deceleration following Khue's suggestion
+		self.prev_vr_ticks = 0
+		self.prev_vl_ticks = 0
+		self.accel_mode = NORMAL_MODE
 
 	class Cmd():
-		SETSPEED = 0x4D01
-		SETACCEL = 0x5567
+		SETSPEED     = 0x4D01
+		SETACCEL     = 0x4D67
+		SETACCELMODE = 0x4D89
 
-		READSPEED = 0x6f57
+		READSPEED    = 0x6f57
 
 	def connect(self):
 		try:
@@ -88,6 +97,23 @@ class ESP32BugBase:
 
 		return True
 
+	def write6bytes(self, cmd, msg_cnt, val1, val2, val3, val4, val5, val6):
+		# print(hex(val1) + " " + hex(val2) + " " + hex(val3) + " " + hex(val4))
+		try:
+			self.send_command(cmd)
+			
+			self.writebyte(msg_cnt)
+			self.writebyte(val1)
+			self.writebyte(val2)
+			self.writebyte(val3)
+			self.writebyte(val4)
+			self.writebyte(val5)
+			self.writebyte(val6)
+		except:
+			return False
+
+		return True
+
 	def setSpeed(self, vr_ticks, vl_ticks):
 		# print("{} {}".format(hex((vr_ticks>>8)&0xff), \
 		# 					 hex(vr_ticks&0xff)))
@@ -102,8 +128,23 @@ class ESP32BugBase:
 										  (vr_ticks&0xff),\
 										  (vl_ticks>>8)&0xff,\
 										  (vl_ticks&0xff))
+
+		# self.write6bytes(self.Cmd.SETSPEED, self.speed_msg_cnt,\
+		# 								  (vr_ticks>>8)&0xff,\
+		# 								  (vr_ticks&0xff),\
+		# 								  (vl_ticks>>8)&0xff,\
+		# 								  (vl_ticks&0xff),\
+		# 								  (accel_mode>>8)&0xff,\
+		# 								  (accel_mode&0xff))
 		self.speed_msg_cnt += 1
 	
+	def setAccelerationMode(self, accel_mode):
+
+		self.writelong(self.Cmd.SETACCELMODE, 0,\
+			                                (accel_mode>>8)&0xff,\
+											(accel_mode&0xff),\
+											0xff,
+											0xff)
 	def setAcceleration(self, acceleration):
 		
 		self.writelong(self.Cmd.SETACCEL, self.accel_msg_cnt,\
@@ -174,14 +215,14 @@ class ESP32BugBase:
 
 		vr_ticks = int(vr * self.TICKS_PER_METER)
 		vl_ticks = int(vl * self.TICKS_PER_METER)
+		##########################################
 		
-		# print(str(vr_ticks) + " " + str(vl_ticks))
 		if self.RIGHT_INVERTED:
 			vr_ticks = -vr_ticks
 		if self.LEFT_INVERTED:
 			vl_ticks = -vl_ticks
 			
-		return vr_ticks, vl_ticks
+		return vr_ticks, vl_ticks, self.accel_mode
 	
 	def __del__(self):
 		self.ser.close()
