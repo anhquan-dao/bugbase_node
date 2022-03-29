@@ -37,12 +37,10 @@ class ESP32BugBase:
 		# Differentiate acceleration and deceleration following Khue's suggestion
 		self.prev_vr_ticks = 0
 		self.prev_vl_ticks = 0
-		self.accel_mode = NORMAL_MODE
 
 	class Cmd():
 		SETSPEED     = 0x4D01
 		SETACCEL     = 0x4D67
-		SETACCELMODE = 0x4D89
 
 		READSPEED    = 0x6f57
 
@@ -128,23 +126,8 @@ class ESP32BugBase:
 										  (vr_ticks&0xff),\
 										  (vl_ticks>>8)&0xff,\
 										  (vl_ticks&0xff))
-
-		# self.write6bytes(self.Cmd.SETSPEED, self.speed_msg_cnt,\
-		# 								  (vr_ticks>>8)&0xff,\
-		# 								  (vr_ticks&0xff),\
-		# 								  (vl_ticks>>8)&0xff,\
-		# 								  (vl_ticks&0xff),\
-		# 								  (accel_mode>>8)&0xff,\
-		# 								  (accel_mode&0xff))
 		self.speed_msg_cnt += 1
 	
-	def setAccelerationMode(self, accel_mode):
-
-		self.writelong(self.Cmd.SETACCELMODE, 0,\
-			                                (accel_mode>>8)&0xff,\
-											(accel_mode&0xff),\
-											0xff,
-											0xff)
 	def setAcceleration(self, acceleration):
 		
 		self.writelong(self.Cmd.SETACCEL, self.accel_msg_cnt,\
@@ -222,7 +205,7 @@ class ESP32BugBase:
 		if self.LEFT_INVERTED:
 			vl_ticks = -vl_ticks
 			
-		return vr_ticks, vl_ticks, self.accel_mode
+		return vr_ticks, vl_ticks
 	
 	def __del__(self):
 		self.ser.close()

@@ -6,7 +6,7 @@
       timeout: 0.1
       base_width: 0.26
       ticks_per_meter: 4904.7
-      left_inverted: false
+      left_inverted: true
       right_inverted: true
       left_enc_inverted: false
       right_enc_inverted: false

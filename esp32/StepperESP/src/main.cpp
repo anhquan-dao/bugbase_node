@@ -70,19 +70,29 @@ bool decreasing = false;
 int8_t cmd = 0;
 
 void loop() {
+	static uint64_t timeout;
+	static uint64_t dt;
+
+	dt = millis() - timeout;
+	if(dt >= 500){
+		stepper.setSpeed(0,0);
+	}
 	int haha = Serial.available();
 	if(haha>=9){
 		// Serial.print("Serial buffer length: ");
 		// Serial.println(haha);
 		cmd = Serial.read();
-		if(cmd == 0x4D)
+		if(cmd == 0x4D){
 			cmd = Serial.read();
-			if(cmd == 0x01)
+			if(cmd == 0x01){
 				setSpeed();	
-			else if(cmd == 0x67)
+				timeout = millis();
+			}
+			else if(cmd == 0x67){
 				setAcceleration();
-			else if(cmd == 0x89)
-				setAccelerationMode();		
+				timeout = millis();
+			}	
+		}	
 	}
 	delay(5);
 }

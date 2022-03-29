@@ -9,15 +9,11 @@ from nav_msgs.msg import Odometry
 import numpy as np
 import serial
 import time
-import threading
 
 from bugbase_driver import ESP32BugBase
 
 WRITETEST = False
 READTEST = False
-
-HALF_DUPLEX = 1
-FULL_DUPLEX = 2
 
 SELFTEST = False
 
@@ -145,10 +141,6 @@ class Node:
 
 		self.encoderOdom = BugBaseEncoder(base_width, ticks_per_meter, left_enc_inverted, right_enc_inverted)
 
-		self.mutex = threading.Lock()
-
-		self.async_mode = FULL_DUPLEX
-
 		self.vr_ticks, self.vl_ticks = 0, 0
 		self.accel_mode = 0
 
@@ -161,21 +153,17 @@ class Node:
 			speed1, speed2 = 0, 0
 
 			if not WRITETEST:
-
-				with self.mutex:
-					speed1, speed2 = self.bugbase.readSpeed()
-					if(speed1 == 0x10000):
-						rospy.logwarn("Encoder Message Counter Fail")
-						speed1, speed2 = 0x0000, 0x0000
-					
-					
-					self.odom_publisher.publish(self.encoderOdom.calculate_odom(speed1, speed2))
-					
-					if SELFTEST:
-						self.vr_ticks, self.vl_ticks = np.random.randint(-7500, 7500), np.random.randint(-7500, 7500)
-						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
-					elif self.async_mode == HALF_DUPLEX:
-						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+				speed1, speed2 = self.bugbase.readSpeed()
+				if(speed1 == 0x10000):
+					rospy.logwarn("Encoder Message Counter Fail")
+					speed1, speed2 = 0x0000, 0x0000
+				
+				
+				self.odom_publisher.publish(self.encoderOdom.calculate_odom(speed1, speed2))
+				
+				if SELFTEST:
+					self.vr_ticks, self.vl_ticks = np.random.randint(-7500, 7500), np.random.randint(-7500, 7500)
+					self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 					# rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 			
 			rate.sleep()
@@ -184,11 +172,10 @@ class Node:
 
 		try:
 			if not READTEST:
-				with self.mutex:
-					self.vr_ticks, self.vl_ticks, self.accel_mode = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
-					# rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
-					if not SELFTEST and self.async_mode == FULL_DUPLEX:
-						self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
+				self.vr_ticks, self.vl_ticks, self.accel_mode = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
+				# rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
+				if not SELFTEST:
+					self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 		
 			if WRITETEST:
 				# self.bugbase.setAcceleration(7500)
