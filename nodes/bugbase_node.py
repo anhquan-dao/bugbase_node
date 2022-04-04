@@ -172,7 +172,7 @@ class Node:
 
 		try:
 			if not READTEST:
-				self.vr_ticks, self.vl_ticks, self.accel_mode = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
+				self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(data.linear.x, data.angular.z)
 				# rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
 				if not SELFTEST:
 					self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
