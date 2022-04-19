@@ -10,7 +10,7 @@ import numpy as np
 import serial
 import time
 
-from bugbase_driver import ESP32BugBase
+from bugbase_node.bugbase_driver import ESP32BugBase
 
 WRITETEST = False
 READTEST = False

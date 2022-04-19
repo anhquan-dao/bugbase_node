@@ -2,4 +2,4 @@
 **/.vscode/
 .vscode/
 *.code-workspace
-*.launch
+*.pyc

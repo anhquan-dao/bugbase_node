@@ -1,0 +1,20 @@
+<launch>
+	<node pkg="bugbase_node" type="bugbase_node.py" name="stepper_diff_wheeled" output="screen">
+    <rosparam>
+      port: '/dev/ttyUSB0'
+      baudrate: 115200
+      timeout: 0.1
+      base_width: 0.26
+      ticks_per_meter: 4904.7
+      left_inverted: true
+      right_inverted: false
+      left_enc_inverted: false
+      right_enc_inverted: false
+      acceleration: 10000
+    </rosparam>
+	</node>
+  
+  <node pkg="bugbase_node" type="speed_test_node.py" name="speed_test_node" output="screen"></node>
+  
+
+</launch>
