@@ -10,7 +10,10 @@
       right_inverted: true
       left_enc_inverted: false
       right_enc_inverted: false
+      turn_direction: true
       acceleration: 5000
+      use_dynamic_acceleration: true
+
     </rosparam>
 	</node>
 
