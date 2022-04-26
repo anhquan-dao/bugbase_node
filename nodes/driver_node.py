@@ -10,7 +10,7 @@ import numpy as np
 import serial
 import time
 
-from bugbase_driver import ESP32BugBase
+from bugbase_node.bugbase_driver import ESP32BugBase
 
 WRITETEST = False
 READTEST = False
@@ -110,39 +110,38 @@ class Node:
 
         port_name = rospy.get_param("~port", "/dev/ttyUSB0")
         baud_rate = rospy.get_param("~baudrate", 115200)
-        timeout = rospy.get_param("~timeout", 0.1)
+        timeout = rospy.get_param("~timeout", 0.1) # Unit: s
         rospy.loginfo("Connecting to ESP board on port {} at baudrate {}".format(
             port_name, baud_rate))
 
-        base_width = rospy.get_param("~base_width", 0.4948)
-        ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7)
+        base_width = rospy.get_param("~base_width", 0.4948) # Unit: m
+        ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7) # Unit: ticks/m
         left_inverted = rospy.get_param("~left_inverted", True)
         right_inverted = rospy.get_param("~right_inverted", True)
         turn_direction = rospy.get_param("~turn_direction", True)
 
         use_dynamic_acceleration = rospy.get_param(
             "~use_dynamic_acceleration", True)
-        acceleration = rospy.get_param("~acceleration", 7000)
+        acceleration = rospy.get_param("~acceleration", 5000) # Unit: ticks/s^2
+        deceleration = rospy.get_param("~deceleration", 3000) # Unit: ticks/s^2
+        brake_accel = rospy.get_param("~brake_accel", 7000) # Unit: ticks/s^2
+        accel_profile = [acceleration, deceleration, brake_accel]
 
-        update_rate = rospy.get_param("~update_rate", 20)
+        decel_time_limit = rospy.get_param("~deceleration_time_limit", 500) # Unit: ms
+
+        self.update_period = rospy.get_param("~update_period", 50) # Unit: ms
 
         left_enc_inverted = rospy.get_param("~left_enc_inverted", False)
         right_enc_inverted = rospy.get_param("~right_enc_inverted", True)
 
-        yaw_offset = rospy.get_param("~yaw_offset", 0)
-
         self.bugbase = ESP32BugBase(port_name, baud_rate, timeout,
                                     base_width, ticks_per_meter, left_inverted, right_inverted,
-                                    turn_direction, use_dynamic_acceleration, acceleration)
+                                    turn_direction, use_dynamic_acceleration, accel_profile,
+                                    decel_time_limit, self.update_period)
 
         if not self.bugbase.connect():
             rospy.logfatal("Could not connect to ESP32 board")
             rospy.signal_shutdown("Could not connect to ESP32 board")
-
-        self.bugbase.setAcceleration(acceleration)
-        rospy.loginfo("Setting motor's acceleration to " +
-                      str(acceleration) + " ticks/second^2")
-        # time.sleep(1)
 
         rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback, queue_size=1)
 
@@ -158,14 +157,14 @@ class Node:
 
     def run(self):
         rospy.loginfo("Starting motor driver")
-
-        rate = rospy.Rate(50)
+        
+        rate = rospy.Rate(1000.0/self.update_period)
 
         while not rospy.is_shutdown():
             speed1, speed2 = 0, 0
 
             if not WRITETEST:
-                read_what = self.bugbase.readDriver()
+                read_what = self.bugbase.waitForHeader()
                 if read_what == 0:
                     speed1, speed2 = self.bugbase.readSpeed()
 
@@ -189,6 +188,9 @@ class Node:
 
                 elif read_what == 10:
                     print("error")
+
+                elif read_what == 11:
+                    print("timeout")
 
             rate.sleep()
 

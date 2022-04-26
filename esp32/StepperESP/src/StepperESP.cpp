@@ -30,10 +30,12 @@ void StepperESP::setEncoderPin(const uint8_t encoderA_[2], const uint8_t encoder
 }
 
 void StepperESP::reset()
-{
-	delay(5000);
-	char msg[] = "I'm being restarted";
-	sendCustomMessage(msg, 20);
+{	
+	disableTx = true;
+	re_init = true;
+	init_checklist = 0x00;
+	char msg[] = "Driver resetting .....";
+	sendCustomMessage(msg);
 	// Flusing out all of Serial buffer
 	while (Serial.available())
 	{
@@ -42,25 +44,111 @@ void StepperESP::reset()
 	}
 
 	// Wait 1000ms for both stepper object to clear out entries
-	uint16_t start = millis();
-	while (stepper[0]->queueEntries() || stepper[1]->queueEntries())
-	{
-		if (millis() - start > 1000)
-		{
-			char msg[] = "Queue not clear!!!";
-			sendCustomMessage(msg, 19);
-			// ESP.restart();
-			break;
-		}
-	}
+	// uint16_t start = millis();
+	// while (stepper[0]->queueEntries() || stepper[1]->queueEntries())
+	// {
+	// 	if (millis() - start > 1000)
+	// 	{
+	// 		char msg[] = "Queue not clear!!!";
+	// 		sendCustomMessage(msg, 19);
+	// 		// ESP.restart();
+	// 		break;
+	// 	}
+	// }
 
 	sendInitReady();
+	readInitParam();
 }
 
 void StepperESP::sendInitReady()
 {
-	Serial.write(0x7855);
+	delay(200);
+	Serial.write(0x00);
+	Serial.write(0x78);
+	Serial.write(0x55);
+	Serial.write(0x00);
+	Serial.write(0x00);
 	delay(1000);
+}
+
+void StepperESP::readInitParam(){
+	for(int i=0; i<retry_limit && init_checklist != 0x07; i++)
+	{	
+		
+		while(Serial.available() < 5)
+		{
+			delay(10);
+		}
+		int16_t cmd = (Serial.read() << 8) | Serial.read();
+		if((cmd&0xff00) == header.READ_HEADER)
+		{	
+			if((cmd == header.READ_ACCEL_PROFILE_CFG) 
+			    && !init_checklist&0x01)
+			{	
+				Serial.read();
+				int8_t data[6];
+				for(int i = 5; i >= 0; i--){
+					data[i] = Serial.read();
+				}
+				int16_t *accel_ = (int16_t *)(&data[4]);
+				int16_t *decel_ = (int16_t *)(&data[2]);
+				int16_t *brake_ = (int16_t *)(&data[0]);
+				setAccelerationProfile(*accel_, *decel_, *brake_);
+				init_checklist = init_checklist|0x01;
+			}
+			else if((cmd == header.READ_DYNAMIC_ACCEL_CFG)
+			          && !(init_checklist&0x02))
+			{	
+				Serial.read();
+				int8_t data[4];
+				for(int i = 3; i >= 0; i--){
+					data[i] = Serial.read();
+				}
+				decel_divisor = *(int16_t *)(&data[0]);
+				use_dynamic_accel = *(boolean *)(&data[3]);
+				init_checklist = init_checklist|0x02;
+			}
+			else if((cmd == header.READ_UPDATE_PERIOD_CFG) 
+			        && !(init_checklist&0x04))
+			{	
+				Serial.read();
+				int8_t data[4];
+				for(int i = 3; i >= 0; i--){
+					data[i] = Serial.read();
+				}
+				dt = *(float *)(&data[0]);
+				init_checklist = init_checklist|0x04;
+			}
+		}
+	}
+	if(init_checklist != 0x07)
+	{	
+		char msg[] = "Failed Initialization";
+		Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+		Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
+		Serial.print("Init flag: ");
+		Serial.print(init_checklist, HEX);
+		Serial.println();
+		sendCustomMessage(msg);
+		sendError();
+	}
+	else
+	{
+		char msg[] = "Successful Initialization";
+		sendCustomMessage(msg);
+		Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+		Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
+		Serial.print(acceleration_val[0]); Serial.print(" ");
+		Serial.print(acceleration_val[1]); Serial.print(" ");
+		Serial.print(acceleration_val[2]); Serial.print(" ");
+		Serial.print(use_dynamic_accel); Serial.print(" ");
+		Serial.print(decel_divisor); Serial.print(" ");
+		Serial.println(dt);
+		disableTx = false;
+		re_init = false;
+	}
+	
+	// ESP.restart();
 }
 int8_t StepperESP::getQueueState(){
 	boolean queue0 = stepper[0]->isQueueFull();
@@ -136,74 +224,63 @@ void StepperESP::getEncoderSpeed()
 }
 void StepperESP::setSpeed(int16_t speed0, int16_t speed1)
 {
+	if(!re_init)
+	{	
+		uint16_t ab_speed0 = abs(speed0);
+		uint16_t ab_speed1 = abs(speed1);
+		int32_t accel0 = 0;
+		int32_t accel1 = 0;
+		// Avoid step commands that are too small
+		boolean dir0 = speed0 > 0;
+		boolean dir1 = speed1 > 0;
 
-	static long accel0, accel1;
-	// Avoid step commands that are too small
-	boolean dir0 = speed0 > 0;
-	boolean dir1 = speed1 > 0;
+		setDirection(dir0 > 0, dir1 > 0);
+		if (ab_speed0 < 20)
+			stepper[0]->stopMove();
+		else
+			stepper[0]->setSpeedInHz(ab_speed0);
 
-	setDirection(dir0 > 0, dir1 > 0);
-	if (abs(speed0) < 20)
-		stepper[0]->stopMove();
-	else
-		stepper[0]->setSpeedInHz(abs(speed0));
+		if (ab_speed1 < 20)
+			stepper[1]->stopMove();
+		else
+			stepper[1]->setSpeedInHz(ab_speed1);
 
-	if (abs(speed1) < 20)
-		stepper[1]->stopMove();
-	else
-		stepper[1]->setSpeedInHz(abs(speed1));
-
-	/* uint8_t accel_mode0 = SetAccelerationMode(speed0, stepper[0]);
-	uint8_t accel_mode1 = SetAccelerationMode(speed1, stepper[1]);
-
-	accel_mode = min(accel_mode0, accel_mode1);
-
-	if(accel_mode == 2){
-		if(brake_flag == false){
-			accel0 = stepper[0]->getCurrentSpeedInMilliHz()/50;
-			accel1 = stepper[1]->getCurrentSpeedInMilliHz()/50;
-			brake_flag = true;
-		}
-		// Serial.print(accel0);
-		// Serial.print(" ");
-		// Serial.println(accel1);
-		setAcceleration(abs(accel0), abs(accel1));
-	}
-	else
-	{
-		setAcceleration(acceleration_val[accel_mode], acceleration_val[accel_mode]);
-		brake_flag = false;
-	} */
-
-	uint8_t accel_mode0 = SetAccelerationMode(speed0, 0);
-	uint8_t accel_mode1 = SetAccelerationMode(speed1, 1);
+		uint8_t accel_mode0 = SetAccelerationMode(ab_speed0, 0);
+		uint8_t accel_mode1 = SetAccelerationMode(ab_speed1, 1);
 
 #ifdef READ_TEST
-	Serial.println("Acceleration mode: ");
-	Serial.print(accel_mode0);
-	Serial.print(" ");
-	Serial.println(accel_mode1);
+		Serial.println("Acceleration mode: ");
+		Serial.print(accel_mode0);
+		Serial.print(" ");
+		Serial.println(accel_mode1);
 
 #endif
-	if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
-	{
-		if (brake_flag == false)
-		{
-			accel0 = stepper[0]->getCurrentSpeedInMilliHz() / 50;
-			accel1 = stepper[1]->getCurrentSpeedInMilliHz() / 50;
-			brake_flag = true;
+		if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
+		{	
+			if(use_dynamic_accel)
+			{
+				if (brake_flag == false)
+				{
+					accel0 = stepper[0]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
+					accel1 = stepper[1]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
+					brake_flag = true;
+				}
+				setAcceleration(accel0, accel1);
+			}
+			
+			setAcceleration(acceleration_val[SPEED_SCENARIO::BRAKE],
+							acceleration_val[SPEED_SCENARIO::BRAKE]);
 		}
-		setAcceleration(acceleration_val[SPEED_SCENARIO::BRAKE],
-						acceleration_val[SPEED_SCENARIO::BRAKE]);
-		// setAcceleration(accel0,
-		// 				accel1);
+		else
+		{
+			brake_flag = false;
+			int8_t accel_flag = min(accel_mode0, accel_mode1);
+			setAcceleration(acceleration_val[accel_flag], 
+							acceleration_val[accel_flag]);
+		}
+
 	}
-	else
-	{
-		brake_flag = false;
-		accel_flag = min(accel_mode0, accel_mode1);
-		setAcceleration(acceleration_val[accel_mode], acceleration_val[accel_mode]);
-	}
+	
 }
 uint8_t StepperESP::SetAccelerationMode(int16_t speed, FastAccelStepper *stepper)
 {
@@ -409,11 +486,9 @@ void StepperESP::recvWithStartEndMarkers()
 	}
 }
 
-void StepperESP::sendCustomMessage(const char *start, uint8_t len)
+void StepperESP::sendCustomMessage(const char *msg)
 {
-	char msg[len];
-	strcpy(msg, start);
-	Serial.write(0x79);
-	Serial.write(0x56);
+	Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+	Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
 	Serial.println(msg);
 }

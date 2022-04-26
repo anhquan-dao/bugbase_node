@@ -1,6 +1,8 @@
 <launch>
-	<node pkg="bugbase_node" type="bugbase_node.py" name="stepper_diff_wheeled" output="screen">
-    <rosparam>
+  
+	<node pkg="bugbase_node" type="driver_node.py" name="stepper_diff_wheeled" output="screen">
+    <rosparam command="load" file="$(find bugbase_node)/cfg/bugbase.yaml" />
+    <!-- <rosparam>
       port: '/dev/ttyUSB0'
       baudrate: 115200
       timeout: 0.1
@@ -14,7 +16,7 @@
       acceleration: 5000
       use_dynamic_acceleration: true
 
-    </rosparam>
+    </rosparam> -->
 	</node>
 
   <arg name="joy_dev" default="/dev/input/js0" />

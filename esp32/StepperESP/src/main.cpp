@@ -34,6 +34,8 @@ void motor_control_task(void *pvParameters);
 void encoder_read_task(void *pvParameters);
 void setSpeed();
 void setAcceleration();
+
+/// Deprecated method
 void setAccelerationMode();
 
 void setup()
@@ -58,7 +60,7 @@ void setup()
 		NULL,
 		1,
 		&encoder_read,
-		0);
+		1);
 	delay(200);
 }
 
@@ -67,7 +69,8 @@ void setup()
 float i = 0;
 bool decreasing = false;
 
-int8_t cmd = 0;
+int16_t cmd = 0;
+char buffer[2] = {};
 
 void loop()
 {
@@ -88,44 +91,35 @@ void loop()
 	{
 		timeout_flag = false;
 	}
-	int haha = Serial.available();
-	if (haha >= 9)
+	int buffer_len = Serial.available();
+	if (buffer_len >= 2)
 	{
-		// Serial.print("Serial buffer length: ");
-		// Serial.println(haha);
-
-		cmd = Serial.read();
-		if (cmd == 0x4D)
+		cmd = (Serial.read() << 8) | Serial.read();
+		if (cmd == stepper.header.READ_SPEED_CMD)
 		{
-			cmd = Serial.read();
-			if (cmd == 0x01)
-			{
-				setSpeed();
-				timeout = millis();
-			}
-			else if (cmd == 0x67)
-			{
-				setAcceleration();
-				timeout = millis();
-			}
+			setSpeed();
+			timeout = millis();
 		}
-		else if (cmd == 0x78)
-		{
-			cmd = Serial.read();
-			if (cmd == 0x54)
-			{
-				stepper.reset();
-				timeout = millis();
-			}
+		else if (cmd == stepper.header.SOFT_RESET) // 0x7954: Reset
+		{	
+			vTaskSuspend(encoder_read);
+			delay(200);
+			stepper.reset();
+			vTaskResume(encoder_read);
+			timeout = millis();
 		}
 	}
+
+	// Get state of queue of the two stepper software driver
+	// Report the state 
+	// TODO: Do something with this information
 	int8_t queue_state = stepper.getQueueState();
 	switch(queue_state)
 	{
 		case stepper.QUEUE_STATE::FULL:
 		{
 			char msg[] = "Both stepper queues are full";
-			stepper.sendCustomMessage(msg, 29);
+			stepper.sendCustomMessage(msg);
 			
 		}
 			break;
@@ -134,14 +128,14 @@ void loop()
 		case stepper.QUEUE_STATE::STEPPER1_FULL:
 		{
 			char msg[] = "Stepper 1 queue is full";
-			stepper.sendCustomMessage(msg, 24);
+			stepper.sendCustomMessage(msg);
 		}	
 			break;
 
 		case stepper.QUEUE_STATE::STEPPER0_FULL:
 		{
 			char msg[] = "Stepper 0 queue is full";
-			stepper.sendCustomMessage(msg, 24);
+			stepper.sendCustomMessage(msg);
 		}
 			break;
 	}
@@ -174,82 +168,13 @@ void setSpeed()
 
 	stepper.setSpeed(*speed_1, *speed_2);
 
-	// if(*accel_mode == 2){
-	// 	stepper.setAcceleration(10000,10000);
-	// }
-	// else if(*accel_mode == 1){
-	// 	stepper.setAcceleration(7500,7500);
-	// }
-	// else{
-	// 	stepper.setAcceleration(5000,5000);
-	// }
-
-	/* Selftest section */
-
 #ifdef READ_TEST
+	Serial.write((stepper.header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+	Serial.write(stepper.header.SEND_HUMAN_MESSAGE & 0xff);
 	Serial.print("Motor Speed: ");
 	Serial.print(*speed_1);
 	Serial.print(" ");
 	Serial.print(*speed_2);
-	Serial.print(" Accel mode: ");
-	Serial.println(stepper.accel_mode);
-#endif
-}
-
-// void setAccelerationMode(){
-// 	Serial.read();
-
-// 	int8_t data[4];
-// 	for(int i = 3; i >= 0; i--){
-// 		data[i] = Serial.read();
-// 	}
-// 	int16_t *accel_mode;
-// 	accel_mode = (int16_t *)(&data[2]);
-// 	if(*accel_mode == 2){
-// 		stepper.setAcceleration(10000,10000);
-// 	}
-// 	else if(*accel_mode == 1){
-// 		stepper.setAcceleration(7500,7500);
-// 	}
-// 	else{
-// 		stepper.setAcceleration(5000,5000);
-// 	}
-
-// 	#ifdef READ_TEST
-// 		Serial.print("Acceleration mode: ");
-// 		Serial.println(*accel_mode);
-// 	#endif
-
-// }
-void setAcceleration()
-{
-	uint8_t new_msg_cnt = Serial.read();
-	if (new_msg_cnt == (accel_msg_cnt + 1))
-	{
-		accel_msg_cnt += 1;
-	}
-	else
-	{
-		accel_msg_cnt += 1;
-	}
-
-	int8_t data[4];
-	for (int i = 3; i >= 0; i--)
-	{
-		data[i] = Serial.read();
-	}
-	int16_t *accel0, *accel1;
-	accel0 = (int16_t *)(&data[0]);
-	accel1 = (int16_t *)(&data[2]);
-	stepper.setAcceleration(*accel0, *accel1);
-
-	/* Selftest section */
-
-#ifdef READ_TEST
-	Serial.print("Acceleration: ");
-	Serial.print(*accel0);
-	Serial.print(" ");
-	Serial.print(*accel1);
 	Serial.println();
 #endif
 }
@@ -257,16 +182,15 @@ void setAcceleration()
 void encoder_read_task(void *pvParameters)
 {
 	TickType_t xLastWakeTime = xTaskGetTickCount();
-	const TickType_t xFrequency = stepper.dt / portTICK_PERIOD_MS;
+	TickType_t xFrequency = stepper.dt / portTICK_PERIOD_MS;
 
 	for (;;)
 	{
+		xFrequency = stepper.dt / portTICK_PERIOD_MS;
+		
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
 		stepper.getEncoderSpeed();
-
-#ifndef READ_TEST
 		stepper.sendEncoderSpeed();
-#endif
 	}
 }

@@ -5,7 +5,7 @@ import serial
 import time
 import struct
 
-import bugbase_node.esp32_message_header
+import bugbase_node.esp32_message_header as ESP32Header
 
 print("hello")
 
@@ -56,7 +56,7 @@ class ESP32BugBase:
         self.prev_vr_ticks = 0
         self.prev_vl_ticks = 0
 
-        # self.header = esp32_header.MessageHeader()
+        self.MSG_HEADER = ESP32Header.ROSInterfaceMessageHeader()
 
     class Cmd():
         SETSPEED = 0x4D01
@@ -83,8 +83,9 @@ class ESP32BugBase:
             # Flush all the data from the the buffer length before
             # resetting procedure
             buffer_len = self.ser.in_waiting
-            self.send_command(self.Cmd.INIT)
+            self.send_command(self.MSG_HEADER.SOFT_RESET)
             self.ser.read(buffer_len)
+            time.sleep(1.0)
 
             header_wait_timer = time.time()
             while True:
@@ -191,7 +192,7 @@ class ESP32BugBase:
         # 					 hex(vl_ticks&0xff)))
 
         # print(self.speed_msg_cnt&0xff)
-        self.writelong(self.Cmd.SETSPEED, self.speed_msg_cnt,
+        self.writelong(self.MSG_HEADER.WRITE_SPEED_CMD, self.speed_msg_cnt,
                        (vr_ticks >> 8) & 0xff,
                        (vr_ticks & 0xff),
                        (vl_ticks >> 8) & 0xff,
@@ -206,7 +207,7 @@ class ESP32BugBase:
         print(acceleration)
         accel, decel, brake = acceleration
 
-        self.write6bytes(self.Cmd.INIT_ACCEL, 0x00,
+        self.write6bytes(self.MSG_HEADER.WRITE_ACCEL_PROFILE_CFG, 0x00,
                         (accel >> 8) & 0xff, (accel & 0xff),
                         (decel >> 8) & 0xff, (decel & 0xff),
                         (brake >> 8) & 0xff, (brake & 0xff))
@@ -218,7 +219,7 @@ class ESP32BugBase:
 
         use_dynamic_accel, decel_time = dynamic_accel_cfg
 
-        self.writelong(self.Cmd.INIT_DYNAMIC_ACCEL, 0x00,
+        self.writelong(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG, 0x00,
                        (use_dynamic_accel & 0xff), 0x00,
                        (decel_time >>8) & 0xff   , (decel_time & 0xff))
 
@@ -227,12 +228,15 @@ class ESP32BugBase:
         if update_rate == None:
             update_rate = self.UPDATE_PERIOD
 
+        # Convert float to bytearray with length 4
+        # Then convert the bytearray to uint64_t to perform
+        # bitwise operation
         update_rate_b = bytearray(struct.pack(">f", update_rate))
         update_rate_i = struct.unpack(">I", update_rate_b)[0]
 
-        self.writelong(self.Cmd.INIT_UPDATE_RATE, 0x00, 
-                        (update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
-                        (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
+        self.writelong(self.MSG_HEADER.WRITE_UPDATE_PERIOD_CFG, 0x00, 
+                    (update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
+                    (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
             
 
     def writeInitParam(self):
@@ -253,31 +257,36 @@ class ESP32BugBase:
         8:  Init Ready
         9:  Custom message
         10: Error
-        11: Timout
+        11: Timeout
         """
 
         header1, header2 = (0, 0), (0, 0)
-        header_try_count = 0
+        header_try_timer = time.time()
+        empty_buffer_timer = time.time()
         while True:
             while self.ser.in_waiting < 2:
-                # print(self.ser.in_waiting)
+                if(time.time() - empty_buffer_timer > 0.5):
+                    return 11
                 time.sleep(0.01)
-                pass
+
             header2 = self.readbyte()
             # print("{} {}".format(hex(header1[1]), hex(header2[1])))
 
-            if(header1[1] == 0x78 and header2[1] == 0x56):
+            if(header1[1] == ((self.MSG_HEADER.READ_HUMAN_MESSAGE>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_HUMAN_MESSAGE & 0xff)):
                 return 9
-            if(header1[1] == 0x78 and header2[1] == 0x55):
+            if(header1[1] == ((self.MSG_HEADER.READ_INIT_READY>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_INIT_READY & 0xff)):
                 return 8
-            if(header1[1] == 0x6f and header2[1] == 0x57):
+            if(header1[1] == ((self.MSG_HEADER.READ_ENCODER>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_ENCODER & 0xff)):
                 return 0
-            if(header1[1] == 0x78 and header2[1] == 0x90):
+            if(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
                 return 10
 
             header1 = header2
-            header_try_count += 1
-            if(header_try_count >= self.max_header_try):
+            if(time.time() -  header_try_timer > 0.5):
                 return 11
 
     def readSpeed(self):
