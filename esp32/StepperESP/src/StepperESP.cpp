@@ -72,12 +72,25 @@ void StepperESP::sendInitReady()
 }
 
 void StepperESP::readInitParam(){
+	uint16_t wait_time = millis();
+	uint16_t max_wait_time = 500;
+	boolean no_header_flag = false;
 	for(int i=0; i<retry_limit && init_checklist != 0x07; i++)
 	{	
-		
+		wait_time = millis();
 		while(Serial.available() < 5)
 		{
+			if(millis() - wait_time < max_wait_time)
+			{
+				no_header_flag = true;
+				break;
+			}
 			delay(10);
+		}
+		if(no_header_flag)
+		{
+			sendError();
+			break;
 		}
 		int16_t cmd = (Serial.read() << 8) | Serial.read();
 		if((cmd&0xff00) == header.READ_HEADER)
@@ -100,12 +113,15 @@ void StepperESP::readInitParam(){
 			          && !(init_checklist&0x02))
 			{	
 				Serial.read();
-				int8_t data[4];
-				for(int i = 3; i >= 0; i--){
+				int8_t data[6];
+				for(int i = 5; i >= 0; i--){
 					data[i] = Serial.read();
 				}
-				decel_divisor = *(int16_t *)(&data[0]);
-				use_dynamic_accel = *(boolean *)(&data[3]);
+				decel_divisor = *(int16_t *)(&data[2]);
+				use_dynamic_accel = *(boolean *)(&data[5]);
+				send_full = *(boolean *)(&data[4]);
+				int16_t *weak_accel_ = (int16_t *)(&data[0]);
+				acceleration_val[0] = *weak_accel_;
 				init_checklist = init_checklist|0x02;
 			}
 			else if((cmd == header.READ_UPDATE_PERIOD_CFG) 
@@ -141,6 +157,7 @@ void StepperESP::readInitParam(){
 		Serial.print(acceleration_val[0]); Serial.print(" ");
 		Serial.print(acceleration_val[1]); Serial.print(" ");
 		Serial.print(acceleration_val[2]); Serial.print(" ");
+		Serial.print(acceleration_val[3]); Serial.print(" ");
 		Serial.print(use_dynamic_accel); Serial.print(" ");
 		Serial.print(decel_divisor); Serial.print(" ");
 		Serial.println(dt);
@@ -222,7 +239,7 @@ void StepperESP::getEncoderSpeed()
 	encoder[0].clearCount();
 	encoder[1].clearCount();
 }
-void StepperESP::setSpeed(int16_t speed0, int16_t speed1)
+void StepperESP::setSpeedAccel(int16_t speed0, int16_t speed1)
 {
 	if(!re_init)
 	{	
@@ -280,7 +297,32 @@ void StepperESP::setSpeed(int16_t speed0, int16_t speed1)
 		}
 
 	}
-	
+}
+void StepperESP::setSpeed(int16_t speed0, int16_t speed1)
+{
+	if(!re_init)
+	{	
+		set_tick_speed[0] = speed0;
+		set_tick_speed[1] = speed1;
+		uint16_t ab_speed0 = abs(speed0);
+		uint16_t ab_speed1 = abs(speed1);
+		int32_t accel0 = 0;
+		int32_t accel1 = 0;
+		// Avoid step commands that are too small
+		boolean dir0 = speed0 > 0;
+		boolean dir1 = speed1 > 0;
+
+		setDirection(dir0 > 0, dir1 > 0);
+		if (ab_speed0 < 20)
+			stepper[0]->stopMove();
+		else
+			stepper[0]->setSpeedInHz(ab_speed0);
+
+		if (ab_speed1 < 20)
+			stepper[1]->stopMove();
+		else
+			stepper[1]->setSpeedInHz(ab_speed1);
+	}
 }
 uint8_t StepperESP::SetAccelerationMode(int16_t speed, FastAccelStepper *stepper)
 {
@@ -361,6 +403,88 @@ uint8_t StepperESP::SetAccelerationMode(int16_t speed, int stepper_no)
 	{
 		return SPEED_SCENARIO::BRAKE;
 	}
+}
+uint8_t StepperESP::SetAccelerationMode(int stepper_no)
+{
+	deceleration_duration[stepper_no] = millis() - deceleration_timer[stepper_no];
+	if (deceleration_flag[stepper_no] &&
+		deceleration_duration[stepper_no] > deceleration_time_limit)
+	{
+		deceleration_flag[stepper_no] = false;
+		return SPEED_SCENARIO::BRAKE;
+	}
+	if (tick_speed_est[stepper_no] == 0)
+	{
+		return SPEED_SCENARIO::ACCEL;
+	}
+
+	if (stepper[stepper_no]->getSpeedInMilliHz() <= 100)
+	{
+		return SPEED_SCENARIO::BRAKE;
+	}
+
+	uint8_t ramp_state = stepper[stepper_no]->rampState() & RAMP_STATE_MASK;
+	if (ramp_state & RAMP_STATE_REVERSE)
+	{
+		if (!deceleration_flag[stepper_no] &&
+			!done_deceleration_flag[stepper_no])
+		{
+			deceleration_flag[stepper_no] = true;
+			done_deceleration_flag[stepper_no] = true;
+			deceleration_timer[stepper_no] = millis();
+		}
+		if (!deceleration_flag[stepper_no] &&
+			done_deceleration_flag[stepper_no])
+		{
+			return SPEED_SCENARIO::BRAKE;
+		}
+		return SPEED_SCENARIO::DECEL;
+	}
+	else
+	{
+		done_deceleration_flag[stepper_no] = false;
+		if (tick_speed[stepper_no] < boundary_speed)
+		{
+			return SPEED_SCENARIO::WEAK_ACCEL;
+		}
+		return SPEED_SCENARIO::ACCEL;
+	}
+}
+
+void StepperESP::SetDynamicAcceleration()
+{	
+	uint8_t accel_mode0 = SetAccelerationMode(0);
+	uint8_t accel_mode1 = SetAccelerationMode(1);
+
+	if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
+	{	
+		if(use_dynamic_accel)
+		{
+			if (brake_flag == false)
+			{
+				tick_accel[0] = stepper[0]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
+				tick_accel[1] = stepper[1]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
+				brake_flag = true;
+			}
+			setAcceleration(tick_accel[0], tick_accel[1]);
+		}
+		else
+		{
+			setAcceleration(acceleration_val[SPEED_SCENARIO::BRAKE],
+						acceleration_val[SPEED_SCENARIO::BRAKE]);
+		}
+		
+	}
+	else
+	{
+		brake_flag = false;
+		int8_t accel_flag = min(accel_mode0, accel_mode1);
+		tick_accel[0] = acceleration_val[accel_flag];
+		tick_accel[1] = acceleration_val[accel_flag];
+		setAcceleration(tick_accel[0], 
+						tick_accel[1]);
+	}
+
 }
 void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
 {

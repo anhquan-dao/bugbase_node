@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 import serial
@@ -7,41 +7,32 @@ import struct
 
 import bugbase_node.esp32_message_header as ESP32Header
 
-print("hello")
-
-
-NORMAL_MODE = 0
-DECEL_MODE = 1
-BRAKE_MODE = 2
-
-
 class ESP32BugBase:
 
-    def __init__(self, port, baud, timeout, base_width,
-                 ticks_per_meter, left_inverted, right_inverted, turn_direction,
-                 use_dynamic_acceleration, acceleration,
-                 decel_time_limit, update_period
-                 ):
-        self.port = port
-        self.baud = baud
-        self.timeout = timeout
+    def __init__(self, params):
+        self.port = params["port"]
+        self.baud = params["baud"]
+        self.timeout = params["timeout"]
 
         self.is_initialized = False
 
         #######################################################
         # User-defined parameters through rosparam
-        self.LEFT_INVERTED = left_inverted
-        self.RIGHT_INVERTED = right_inverted
-        self.TURN_DIRECTION = turn_direction
+        self.LEFT_INVERTED = params["left_inverted"]
+        self.RIGHT_INVERTED = params["right_inverted"]
+        self.TURN_DIRECTION = params["turn_direction"]
 
-        self.BASE_WIDTH = base_width
-        self.TICKS_PER_METER = ticks_per_meter
+        self.BASE_WIDTH = params["base_width"]
+        self.TICKS_PER_METER = params["ticks_per_meter"]
 
-        self.ACCELERATION = acceleration
-        self.USE_DYNAMIC_ACCELERATION = use_dynamic_acceleration
-        self.DECEL_TIME = decel_time_limit # ms 
-        # TODO: add to initializtion parameter
-        self.UPDATE_PERIOD = update_period # ms
+        self.ACCELERATION = params["accel_profile"]
+        self.USE_DYNAMIC_ACCELERATION = params["use_dynamic_acceleration"]
+        self.DECEL_TIME = params["decel_time_limit"]
+        self.UPDATE_PERIOD = params["update_period"]
+
+        self.FULL_SPEED = params["full_speed"]
+
+        self.NO_ENCODER_OPERATION = params["no_encoder_operation"]
         ######################################################
         self.encoder_msg_cnt = 0
         self.speed_msg_cnt = 0
@@ -97,6 +88,9 @@ class ESP32BugBase:
                     break
                 if read_what == 9:
                     print(self.readString())
+                if read_what == 10:
+                    print("error")
+                    return False
                 if time.time() - header_wait_timer > 2.0:
                     print("Timeout")
                     return False
@@ -108,8 +102,8 @@ class ESP32BugBase:
         return True
 
     def send_command(self, cmd):
-        self.ser.write(chr((cmd >> 8) & 0xff))
-        self.ser.write(chr(cmd & 0xff))
+        cmd_bytearray = bytes(bytearray(((cmd>>8)&0xff, cmd&0xff)))
+        self.ser.write(cmd_bytearray)
 
     def readbyte(self):
         data = self.ser.read(1)
@@ -120,7 +114,7 @@ class ESP32BugBase:
 
     def readString(self):
         data = self.ser.readline().decode("utf-8")
-        return data
+        return data[:-1]
 
     def read4(self):
         val1 = self.readbyte()
@@ -134,8 +128,36 @@ class ESP32BugBase:
                         return (1, val1[1] << 24 | val2[1] << 16 | val3[1] << 8 | val4[1])
         return (0, 0)
 
+    def read8(self):
+        val1 = self.read4()
+        if val1[0]:
+            val2 = self.read4()
+            if val2[0]:
+                return (1, val1[1] << 32 | val2[1])
+        
+        return (0, 0)
+        
+    
+    def read6(self):
+        val1 = self.readbyte()
+        if val1[0]:
+            val2 = self.readbyte()
+            if val2[0]:
+                val3 = self.readbyte()
+                if val3[0]:
+                    val4 = self.readbyte()
+                    if val4[0]:
+                        val5 = self.readbyte()
+                        if val5[0]:
+                            val6 = self.readbyte()
+                            if val6[0]:
+                                return (1, val1[1] << 40 | val2[1] << 32 | val3[1] << 24 | \
+                                    val4[1] << 16 | val5[1] << 8 | val6[1])
+        return (0, 0)
+
     def writebyte(self, val):
-        self.ser.write(chr(val & 0xff))
+        val_bytearray = bytes(bytearray((val&0xff,)))
+        self.ser.write(val_bytearray)
         # time.sleep(0.01)
         # print(hex(val&0xff))
 
@@ -204,8 +226,7 @@ class ESP32BugBase:
         if acceleration == None:
             acceleration = self.ACCELERATION
         
-        print(acceleration)
-        accel, decel, brake = acceleration
+        accel, decel, brake = acceleration[1:]
 
         self.write6bytes(self.MSG_HEADER.WRITE_ACCEL_PROFILE_CFG, 0x00,
                         (accel >> 8) & 0xff, (accel & 0xff),
@@ -215,13 +236,15 @@ class ESP32BugBase:
     def setDynamicAcceleration(self, dynamic_accel_cfg = None):
         if dynamic_accel_cfg == None:
             dynamic_accel_cfg = [self.USE_DYNAMIC_ACCELERATION,
-                                 self.DECEL_TIME]
+                                 self.DECEL_TIME,
+                                 self.ACCELERATION[0]]
 
-        use_dynamic_accel, decel_time = dynamic_accel_cfg
+        use_dynamic_accel, decel_time, weak_accel = dynamic_accel_cfg
 
-        self.writelong(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG, 0x00,
-                       (use_dynamic_accel & 0xff), 0x00,
-                       (decel_time >>8) & 0xff   , (decel_time & 0xff))
+        self.write6bytes(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG, 0x00,
+                       (use_dynamic_accel & 0xff), (self.FULL_SPEED & 0xff),
+                       (decel_time >>8) & 0xff   , (decel_time & 0xff),
+                       (weak_accel >>8) & 0xff, (weak_accel & 0xff))
 
     def setUpdatePeriod(self, update_rate = None):
         
@@ -237,8 +260,7 @@ class ESP32BugBase:
         self.writelong(self.MSG_HEADER.WRITE_UPDATE_PERIOD_CFG, 0x00, 
                     (update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
                     (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
-            
-
+    
     def writeInitParam(self):
 
         self.setAcceleration()
@@ -254,6 +276,7 @@ class ESP32BugBase:
         Return value:
         
         0:  Encoder speeds
+        1:  Speed Profile
         8:  Init Ready
         9:  Custom message
         10: Error
@@ -265,9 +288,10 @@ class ESP32BugBase:
         empty_buffer_timer = time.time()
         while True:
             while self.ser.in_waiting < 2:
-                if(time.time() - empty_buffer_timer > 0.5):
+                if(time.time() - empty_buffer_timer > (self.UPDATE_PERIOD*2.0)/1000.0):
                     return 11
-                time.sleep(0.01)
+                # Wait for the set update period, tolerance 10%
+                time.sleep((self.UPDATE_PERIOD*1.1)/1000.0) 
 
             header2 = self.readbyte()
             # print("{} {}".format(hex(header1[1]), hex(header2[1])))
@@ -281,12 +305,15 @@ class ESP32BugBase:
             if(header1[1] == ((self.MSG_HEADER.READ_ENCODER>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ENCODER & 0xff)):
                 return 0
+            if(header1[1] == ((self.MSG_HEADER.READ_FULL_SPEED_PROFILE>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_FULL_SPEED_PROFILE & 0xff)):
+                return 1
             if(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
                 return 10
 
             header1 = header2
-            if(time.time() -  header_try_timer > 0.5):
+            if(time.time() -  header_try_timer > 0.1):
                 return 11
 
     def readSpeed(self):
@@ -300,12 +327,9 @@ class ESP32BugBase:
                 self.encoder_msg_cnt += 1
             else:
                 self.error_count += 1
-                print(
-                    "Encoder message counter fail!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-                # input()
 
                 self.first_encoder_msg = True
-                return 0x10000, 0x10000
+                # return 0x10000, 0x10000
 
             data = self.read4()
             if(data[0]):
@@ -324,6 +348,38 @@ class ESP32BugBase:
             # 	return 0x10000, 0x10000
 
         return 0x0000, 0x0000
+
+    def readSpeedProfile(self):
+        data = self.read4()
+        if(data[0]):
+            accel_0 = (data[1]>>16) & 0xffff
+            accel_1 = data[1] & 0xffff
+        
+            data = self.read8()
+            if(data[0]):
+                est_speed_0 = (data[1] >> 32) & 0xffffffff
+                est_speed_1 = data[1] & 0xffffffff
+
+                # Convert 4 bytes unsigned to 4 bytes signed
+                if(est_speed_0 & 0x80000000):
+                    est_speed_0 = -0x100000000 + est_speed_0
+                if(est_speed_1 & 0x8000):
+                    est_speed_1 = -0x100000000 + est_speed_1
+
+                data = self.read4()
+                if(data[0]):
+                    speed_0 = (data[1] >> 16) & 0xffff
+                    speed_1 = data[1] & 0xffff
+
+                    # Convert 4 bytes unsigned to 4 bytes signed
+                    if(speed_0 & 0x8000):
+                        speed_0 = -0x10000 + speed_0
+                    if(speed_1 & 0x8000):
+                        speed_1 = -0x10000 + speed_1
+
+                    return accel_0, accel_1, est_speed_0, est_speed_1, speed_0, speed_1
+
+
 
     def inv_kinematics(self, linear_x, angular_z):
         if self.TURN_DIRECTION:

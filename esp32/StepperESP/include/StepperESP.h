@@ -67,6 +67,8 @@ public:
     const int8_t init_updatelist[3] = {0x56, 0x57, 0x58};
     uint8_t init_checklist = 0x00;
 
+    boolean send_full;
+
     //----------------------------------------------------------
 
     uint8_t encoder_msg_cnt = 0;
@@ -75,7 +77,7 @@ public:
      * Acceleration values for Accelerating, Decelerating and Braking.
      * Unit: Ticks/s^2
      */ 
-    uint16_t acceleration_val[3] = {3000, 5000, 7000}; 
+    uint16_t acceleration_val[4] = {2500, 3000, 5000, 7000}; 
     
     /**
      * Use dynamic acceleration to ensure both wheels stop
@@ -105,11 +107,25 @@ public:
     uint16_t deceleration_time_limit = 100;
     //-----------------------------------------------------------
 
+    //-----------------------------------------------------------
+    // During low speed, the acceleration will be lower to induce more torque
+    // While during high speed, the acceleration will be higher.
+    // The boundary value between low and high speed range is defined here
+
+    // The speed is measured at the encoder, unit: tick/second
+    uint16_t boundary_speed = 5000;
+    // The gear ratio between the motor shaft and encoder shaft
+    float motor_enc_ratio = 5;
+    // The gear ratio between the wheel shaft and encoder shaft
+    float wheel_enc_ratio = 1.333;
+    //-----------------------------------------------------------
+
     enum SPEED_SCENARIO
-    {
+    {   
+        WEAK_ACCEL,
         ACCEL,
         DECEL,
-        BRAKE
+        BRAKE        
     };
 
     enum QUEUE_STATE{
@@ -142,7 +158,18 @@ public:
     int8_t getQueueState();
 
     void getEncoderSpeed();
+
+    /**
+     * Set speed and determine the acceleration based on the set speed. 
+     * This function is subject to change.
+     */
+    void setSpeedAccel(int16_t speed0, int16_t speed1);
+
+    /**
+     * Set speed 
+     */
     void setSpeed(int16_t speed0, int16_t speed1);
+
 
     /**
      * Determine "Speed Scenario" based on set speed.
@@ -168,6 +195,20 @@ public:
     uint8_t SetAccelerationMode(int16_t speed, int stepper_no);
 
     /**
+     * Continuously acquire ramp state from the FastAccelStepper libray and determine
+     * the required acceleration. Similar to the SetAccelerationMode function, but used
+     * in the main loop instead of when setting speed.
+     * @param stepper_no Stepper's number
+     * @retval 2 Braking
+     * @retval 1 Deceleration
+     * @retval 0 Acceleration
+     * @overload
+     */
+    uint8_t SetAccelerationMode(int stepper_no);
+
+    void SetDynamicAcceleration();
+
+    /**
      * @brief Set the Acceleration of the output steps
      *
      * @param accel0
@@ -183,9 +224,9 @@ public:
      * @param brake Braking Deceleration
      */
     void setAccelerationProfile(int16_t accel, int16_t decel, int16_t brake){
-        acceleration_val[0] = accel;
-        acceleration_val[1] = decel;
-        acceleration_val[2] = brake;
+        acceleration_val[1] = accel;
+        acceleration_val[2] = decel;
+        acceleration_val[3] = brake;
     }
 
     void setDirection(boolean dir0, boolean dir1);
@@ -223,11 +264,43 @@ public:
     void sendError()
     {
         Serial.write((header.SEND_ERROR>>8) & 0xff);
-        Serial.write(header.SEND_ENCODER & 0xff);
+        Serial.write(header.SEND_ERROR & 0xff);
         Serial.write(0x00);
         Serial.write(0x00);
     }
+    void sendSpeedProfile()
+    {
+        Serial.write((header.SEND_FULL_SPEED_PROFILE>>8) & 0xff);
+        Serial.write(header.SEND_FULL_SPEED_PROFILE & 0xff);
+
+        Serial.write((tick_accel[0] >> 8));
+        Serial.write(tick_accel[0] & 0xff);
+        Serial.write((tick_accel[1] >> 8));
+        Serial.write(tick_accel[1] & 0xff);
+
+        tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
+        tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
+       
+        Serial.write((tick_speed_est[0] >> 24) & 0xff);
+        Serial.write((tick_speed_est[0] >> 16) & 0xff);
+        Serial.write((tick_speed_est[0] >> 8) & 0xff);
+        Serial.write(tick_speed_est[0] & 0xff);
+
+        Serial.write((tick_speed_est[1] >> 24) & 0xff);
+        Serial.write((tick_speed_est[1] >> 16) & 0xff);
+        Serial.write((tick_speed_est[1] >> 8) & 0xff);
+        Serial.write(tick_speed_est[1] & 0xff);
+
+        Serial.write((tick_speed[0] >> 8) & 0xff);
+        Serial.write(tick_speed[0] & 0xff);
+
+        Serial.write((tick_speed[1] >> 8) & 0xff);
+        Serial.write(tick_speed[1] & 0xff);
+    }
+    volatile int16_t tick_accel[2] = {0, 0};
     volatile int16_t tick_speed[2] = {0, 0};
+    volatile int32_t tick_speed_est[2] = {0, 0};
+    volatile int32_t set_tick_speed[2] = {0, 0};
     volatile int64_t tick_count[2] = {0, 0};
 
     uint8_t accel_mode;

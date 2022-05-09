@@ -3,22 +3,29 @@ baudrate: 115200
 timeout: 0.1
 
 base_width: 0.26
-ticks_per_meter: 4904.7
-turn_direction: true
+ticks_per_meter: 24525
+turn_direction: false
 
-left_inverted: true
-right_inverted: true
+left_inverted: false
+right_inverted: false
 
+no_encoder_operation: false
 left_enc_inverted: true
 right_enc_inverted: true
+wheel_enc_ratio: 1.333
 
 use_dynamic_acceleration: true
-acceleration: 3000
-deceleration: 5000
-brake_accel:  7000
+acceleration: 10000
+weak_acceleration: 5000
+deceleration: 15000
+brake_accel:  21000
 deceleration_time_limit: 500 #ms
 
-update_period: 16.667  #ms
+update_rate: 60 #Hz
+
+full_speed: true
+
+visualizer: false
 
 odom_topic: '/odom/wheel'
 

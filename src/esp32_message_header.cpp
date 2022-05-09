@@ -10,6 +10,7 @@ class ROSInterfaceMessageHeader
         const int16_t READ_ERROR            = ESP32MessageHeader::SEND_ERROR;
         const int16_t READ_HUMAN_MESSAGE    = ESP32MessageHeader::SEND_HUMAN_MESSAGE;
         const int16_t READ_INIT_READY       = ESP32MessageHeader::SEND_INIT_READY;
+        const int16_t READ_FULL_SPEED_PROFILE = ESP32MessageHeader::SEND_FULL_SPEED_PROFILE;
         
 
         const int16_t WRITE_HEADER            = ESP32MessageHeader::READ_HEADER;
@@ -21,6 +22,7 @@ class ROSInterfaceMessageHeader
         const int16_t WRITE_ACCEL_PROFILE_CFG = ESP32MessageHeader::READ_ACCEL_PROFILE_CFG;
         const int16_t WRITE_DYNAMIC_ACCEL_CFG = ESP32MessageHeader::READ_DYNAMIC_ACCEL_CFG;
         const int16_t WRITE_UPDATE_PERIOD_CFG = ESP32MessageHeader::READ_UPDATE_PERIOD_CFG;
+        const int16_t WRITE_ENCODER_CFG       = ESP32MessageHeader::READ_ENCODER_CFG;
         
 };
 
@@ -31,6 +33,7 @@ BOOST_PYTHON_MODULE(esp32_message_header)
     ("ROSInterfaceMessageHeader")
         .def_readonly("READ_HEADER", &ROSInterfaceMessageHeader::READ_HEADER)
         .def_readonly("READ_ENCODER", &ROSInterfaceMessageHeader::READ_ENCODER)
+        .def_readonly("READ_FULL_SPEED_PROFILE", &ROSInterfaceMessageHeader::READ_FULL_SPEED_PROFILE)
         .def_readonly("READ_ERROR", &ROSInterfaceMessageHeader::READ_ERROR)
         .def_readonly("READ_HUMAN_MESSAGE", &ROSInterfaceMessageHeader::READ_HUMAN_MESSAGE)
         .def_readonly("READ_INIT_READY", &ROSInterfaceMessageHeader::READ_INIT_READY)
@@ -41,5 +44,6 @@ BOOST_PYTHON_MODULE(esp32_message_header)
         .def_readonly("WRITE_ACCEL_PROFILE_CFG", &ROSInterfaceMessageHeader::WRITE_ACCEL_PROFILE_CFG)
         .def_readonly("WRITE_DYNAMIC_ACCEL_CFG", &ROSInterfaceMessageHeader::WRITE_DYNAMIC_ACCEL_CFG)
         .def_readonly("WRITE_UPDATE_PERIOD_CFG", &ROSInterfaceMessageHeader::WRITE_UPDATE_PERIOD_CFG)
+        .def_readonly("WRITE_ENCODER_CFG", &ROSInterfaceMessageHeader::WRITE_ENCODER_CFG)
     ;
 }

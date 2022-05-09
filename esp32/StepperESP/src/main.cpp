@@ -56,7 +56,7 @@ void setup()
 	xTaskCreatePinnedToCore(
 		encoder_read_task,
 		"encoder_read",
-		10000,
+		20000,
 		NULL,
 		1,
 		&encoder_read,
@@ -94,7 +94,7 @@ void loop()
 	int buffer_len = Serial.available();
 	if (buffer_len >= 2)
 	{
-		cmd = (Serial.read() << 8) | Serial.read();
+		cmd = (Serial.read() << 8) | Serial.peek();
 		if (cmd == stepper.header.READ_SPEED_CMD)
 		{
 			setSpeed();
@@ -113,32 +113,32 @@ void loop()
 	// Get state of queue of the two stepper software driver
 	// Report the state 
 	// TODO: Do something with this information
-	int8_t queue_state = stepper.getQueueState();
-	switch(queue_state)
-	{
-		case stepper.QUEUE_STATE::FULL:
-		{
-			char msg[] = "Both stepper queues are full";
-			stepper.sendCustomMessage(msg);
+	// int8_t queue_state = stepper.getQueueState();
+	// switch(queue_state)
+	// {
+	// 	case stepper.QUEUE_STATE::FULL:
+	// 	{
+	// 		char msg[] = "Both stepper queues are full";
+	// 		stepper.sendCustomMessage(msg);
 			
-		}
-			break;
+	// 	}
+	// 		break;
 			
 
-		case stepper.QUEUE_STATE::STEPPER1_FULL:
-		{
-			char msg[] = "Stepper 1 queue is full";
-			stepper.sendCustomMessage(msg);
-		}	
-			break;
+	// 	case stepper.QUEUE_STATE::STEPPER1_FULL:
+	// 	{
+	// 		char msg[] = "Stepper 1 queue is full";
+	// 		stepper.sendCustomMessage(msg);
+	// 	}	
+	// 		break;
 
-		case stepper.QUEUE_STATE::STEPPER0_FULL:
-		{
-			char msg[] = "Stepper 0 queue is full";
-			stepper.sendCustomMessage(msg);
-		}
-			break;
-	}
+	// 	case stepper.QUEUE_STATE::STEPPER0_FULL:
+	// 	{
+	// 		char msg[] = "Stepper 0 queue is full";
+	// 		stepper.sendCustomMessage(msg);
+	// 	}
+	// 		break;
+	// }
 
 	delay(10);
 }
@@ -191,6 +191,18 @@ void encoder_read_task(void *pvParameters)
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
 		stepper.getEncoderSpeed();
-		stepper.sendEncoderSpeed();
+		
+		stepper.SetDynamicAcceleration();
+
+		if(stepper.send_full)
+		{
+			stepper.sendSpeedProfile();
+		}
+		else
+		{	
+			stepper.sendEncoderSpeed();
+		}
+		
+		
 	}
 }
