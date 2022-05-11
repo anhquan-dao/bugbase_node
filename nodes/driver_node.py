@@ -172,7 +172,6 @@ class Node:
                 read_what = self.bugbase.waitForHeader()
                 if read_what <= 1:
                     if(read_what == 0):
-                        print("ayyo")
                         speed1, speed2 = self.bugbase.readSpeed()
 
                     if(read_what == 1):
@@ -252,17 +251,17 @@ if __name__ == "__main__":
     ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7) # Unit: ticks/m
     left_inverted = rospy.get_param("~left_inverted", True)
     right_inverted = rospy.get_param("~right_inverted", True)
-    turn_direction = rospy.get_param("~turn_direction", True)
-
-    use_dynamic_acceleration = rospy.get_param(
-        "~use_dynamic_acceleration", True)
-    acceleration = rospy.get_param("~acceleration", 5000) # Unit: ticks/s^2
-    weak_acceleration = rospy.get_param("~weak_acceleration", 2500)
-    deceleration = rospy.get_param("~deceleration", 3000) # Unit: ticks/s^2
-    brake_accel = rospy.get_param("~brake_accel", 7000) # Unit: ticks/s^2
+    turn_direction = rospy.get_param("~turn_direction", True)\
+    
+    acceleration = rospy.get_param("~acceleration", 2.0) # Unit: m/s^2
+    weak_acceleration = rospy.get_param("~weak_acceleration", 1.0) # Unit: m/s^2
+    deceleration = rospy.get_param("~deceleration", 3.0) # Unit: m/s^2
+    brake_accel = rospy.get_param("~brake_accel", 7.0) # Unit: m/s^2
     accel_profile = [weak_acceleration, acceleration, deceleration, brake_accel]
 
-    decel_time_limit = rospy.get_param("~deceleration_time_limit", 500) # Unit: ms
+    max_acceleration = rospy.get_param("~max_acceleration", 10.0) # Unit: m/s^2
+    decel_time_limit = rospy.get_param("~deceleration_time_limit", 200) # Unit: ms
+    accel_time_limit = rospy.get_param("~acceleration_time_limit", 500) # Unit: ms
 
     update_rate = rospy.get_param("~update_rate", 50) # Unit: Hz
     update_period = 1000.0/update_rate
@@ -275,7 +274,7 @@ if __name__ == "__main__":
     odom_topic = rospy.get_param("~odom_topic", "/odometry/wheel")
 
     visualizer = rospy.get_param("~visualizer", False)
-    full_speed = rospy.get_param("~full_speed", False)
+
     
     params = {
             'port' : port_name,
@@ -286,16 +285,16 @@ if __name__ == "__main__":
             'left_inverted' : left_inverted,
             'right_inverted' : right_inverted,
             'turn_direction' : turn_direction,
-            'use_dynamic_acceleration' : use_dynamic_acceleration,
             'accel_profile' : accel_profile,
+            'max_acceleration' : max_acceleration,
             'decel_time_limit' : decel_time_limit,
+            'accel_time_limit' : accel_time_limit,
             'update_period' : update_period,
             'update_rate' : update_rate,
             'no_encoder_operation' : no_encoder_operation,
             'left_enc_inverted' : left_enc_inverted,
             'right_enc_inverted' : right_enc_inverted,
             'wheel_enc_ratio' : wheel_enc_ratio,
-            'full_speed' : full_speed,
             'odom_topic' : odom_topic,
             'visualizer' : visualizer
         }

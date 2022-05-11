@@ -26,11 +26,14 @@ class ESP32BugBase:
         self.TICKS_PER_METER = params["ticks_per_meter"]
 
         self.ACCELERATION = params["accel_profile"]
-        self.USE_DYNAMIC_ACCELERATION = params["use_dynamic_acceleration"]
+        for i in range(len(self.ACCELERATION)):
+            self.ACCELERATION[i] *= self.TICKS_PER_METER
+            self.ACCELERATION[i] = int(self.ACCELERATION[i])
+
+        self.MAX_ACCELERATION = int(params["max_acceleration"]*self.TICKS_PER_METER)
+        self.ACCEL_TIME = params["accel_time_limit"]
         self.DECEL_TIME = params["decel_time_limit"]
         self.UPDATE_PERIOD = params["update_period"]
-
-        self.FULL_SPEED = params["full_speed"]
 
         self.NO_ENCODER_OPERATION = params["no_encoder_operation"]
         ######################################################
@@ -101,10 +104,6 @@ class ESP32BugBase:
 
         return True
 
-    def send_command(self, cmd):
-        cmd_bytearray = bytes(bytearray(((cmd>>8)&0xff, cmd&0xff)))
-        self.ser.write(cmd_bytearray)
-
     def readbyte(self):
         data = self.ser.read(1)
         if len(data):
@@ -160,12 +159,13 @@ class ESP32BugBase:
         self.ser.write(val_bytearray)
         # time.sleep(0.01)
         # print(hex(val&0xff))
+    
+    def send_command(self, cmd):
+        cmd_bytearray = bytes(bytearray(((cmd>>8)&0xff, cmd&0xff)))
+        self.ser.write(cmd_bytearray)
 
-    def writeshort(self, cmd, msg_cnt, val1, val2):
+    def writeshort(self, val1, val2):
         try:
-            self.send_command(cmd)
-
-            self.writebyte(msg_cnt)
             self.writebyte(val1)
             self.writebyte(val2)
         except:
@@ -174,12 +174,9 @@ class ESP32BugBase:
         return True
 
 
-    def writelong(self, cmd, msg_cnt, val1, val2, val3, val4):
+    def writelong(self, val1, val2, val3, val4):
         # print(hex(val1) + " " + hex(val2) + " " + hex(val3) + " " + hex(val4))
         try:
-            self.send_command(cmd)
-
-            self.writebyte(msg_cnt)
             self.writebyte(val1)
             self.writebyte(val2)
             self.writebyte(val3)
@@ -189,18 +186,17 @@ class ESP32BugBase:
 
         return True
 
-    def write6bytes(self, cmd, msg_cnt, val1, val2, val3, val4, val5, val6):
-        # print(hex(val1) + " " + hex(val2) + " " + hex(val3) + " " + hex(val4))
+    def writelonglong(self, val1, val2):
         try:
-            self.send_command(cmd)
+            self.writebyte((val1 >> 24) & 0xff)
+            self.writebyte((val1 >> 16) & 0xff)
+            self.writebyte((val1 >> 8) & 0xff)
+            self.writebyte(val1 & 0xff)
 
-            self.writebyte(msg_cnt)
-            self.writebyte(val1)
-            self.writebyte(val2)
-            self.writebyte(val3)
-            self.writebyte(val4)
-            self.writebyte(val5)
-            self.writebyte(val6)
+            self.writebyte((val2 >> 24) & 0xff)
+            self.writebyte((val2 >> 16) & 0xff)
+            self.writebyte((val2 >> 8) & 0xff)
+            self.writebyte(val2 & 0xff)
         except:
             return False
 
@@ -214,11 +210,9 @@ class ESP32BugBase:
         # 					 hex(vl_ticks&0xff)))
 
         # print(self.speed_msg_cnt&0xff)
-        self.writelong(self.MSG_HEADER.WRITE_SPEED_CMD, self.speed_msg_cnt,
-                       (vr_ticks >> 8) & 0xff,
-                       (vr_ticks & 0xff),
-                       (vl_ticks >> 8) & 0xff,
-                       (vl_ticks & 0xff))
+        self.send_command(self.MSG_HEADER.WRITE_SPEED_CMD)
+        self.writebyte(self.speed_msg_cnt)
+        self.writelonglong(vr_ticks, vl_ticks)
         self.speed_msg_cnt += 1
 
     def setAcceleration(self, acceleration = None):
@@ -226,25 +220,33 @@ class ESP32BugBase:
         if acceleration == None:
             acceleration = self.ACCELERATION
         
-        accel, decel, brake = acceleration[1:]
+        weak_accel, accel, decel, brake = acceleration
 
-        self.write6bytes(self.MSG_HEADER.WRITE_ACCEL_PROFILE_CFG, 0x00,
-                        (accel >> 8) & 0xff, (accel & 0xff),
-                        (decel >> 8) & 0xff, (decel & 0xff),
-                        (brake >> 8) & 0xff, (brake & 0xff))
+        self.send_command(self.MSG_HEADER.WRITE_ACCEL_PROFILE_CFG)
+        self.writebyte(0x00)
+        self.writelong((accel >> 24) & 0xff, (accel >> 16) & 0xff,
+                       (accel >> 8) & 0xff, accel & 0xff)
+        self.writelong((decel >> 24) & 0xff, (decel >> 16) & 0xff,
+                       (decel >> 8) & 0xff, decel & 0xff)
+        self.writelong((brake >> 24) & 0xff, (brake >> 16) & 0xff,
+                       (brake >> 8) & 0xff, brake & 0xff)
+        self.writelong((weak_accel >> 24) & 0xff, (weak_accel >> 16) & 0xff,
+                       (weak_accel >> 8) & 0xff, weak_accel & 0xff)
 
     def setDynamicAcceleration(self, dynamic_accel_cfg = None):
         if dynamic_accel_cfg == None:
-            dynamic_accel_cfg = [self.USE_DYNAMIC_ACCELERATION,
-                                 self.DECEL_TIME,
-                                 self.ACCELERATION[0]]
+            dynamic_accel_cfg = [self.MAX_ACCELERATION,
+                                 self.ACCEL_TIME,
+                                 self.DECEL_TIME]
 
-        use_dynamic_accel, decel_time, weak_accel = dynamic_accel_cfg
+        max_acceleration, accel_time, decel_time = dynamic_accel_cfg
 
-        self.write6bytes(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG, 0x00,
-                       (use_dynamic_accel & 0xff), (self.FULL_SPEED & 0xff),
-                       (decel_time >>8) & 0xff   , (decel_time & 0xff),
-                       (weak_accel >>8) & 0xff, (weak_accel & 0xff))
+        self.send_command(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG)
+        self.writebyte(0x00)
+        self.writelong((max_acceleration >> 24) & 0xff, (max_acceleration >> 16 & 0xff),
+                       (max_acceleration >> 8) & 0xff, (max_acceleration & 0xff))
+        self.writeshort((accel_time >>8) & 0xff, (accel_time & 0xff))
+        self.writeshort((decel_time >>8) & 0xff, (decel_time & 0xff))
 
     def setUpdatePeriod(self, update_rate = None):
         
@@ -257,9 +259,10 @@ class ESP32BugBase:
         update_rate_b = bytearray(struct.pack(">f", update_rate))
         update_rate_i = struct.unpack(">I", update_rate_b)[0]
 
-        self.writelong(self.MSG_HEADER.WRITE_UPDATE_PERIOD_CFG, 0x00, 
-                    (update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
-                    (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
+        self.send_command(self.MSG_HEADER.WRITE_UPDATE_PERIOD_CFG)
+        self.writebyte(0x00)
+        self.writelong((update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
+                       (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
     
     def writeInitParam(self):
 
@@ -350,10 +353,10 @@ class ESP32BugBase:
         return 0x0000, 0x0000
 
     def readSpeedProfile(self):
-        data = self.read4()
+        data = self.read8()
         if(data[0]):
-            accel_0 = (data[1]>>16) & 0xffff
-            accel_1 = data[1] & 0xffff
+            accel_0 = (data[1]>>32) & 0xffffffff
+            accel_1 = data[1] & 0xffffffff
         
             data = self.read8()
             if(data[0]):
@@ -363,19 +366,19 @@ class ESP32BugBase:
                 # Convert 4 bytes unsigned to 4 bytes signed
                 if(est_speed_0 & 0x80000000):
                     est_speed_0 = -0x100000000 + est_speed_0
-                if(est_speed_1 & 0x8000):
+                if(est_speed_1 & 0x80000000):
                     est_speed_1 = -0x100000000 + est_speed_1
 
-                data = self.read4()
+                data = self.read8()
                 if(data[0]):
-                    speed_0 = (data[1] >> 16) & 0xffff
-                    speed_1 = data[1] & 0xffff
+                    speed_0 = (data[1] >> 32) & 0xffffffff
+                    speed_1 = data[1] & 0xffffffff
 
                     # Convert 4 bytes unsigned to 4 bytes signed
-                    if(speed_0 & 0x8000):
-                        speed_0 = -0x10000 + speed_0
-                    if(speed_1 & 0x8000):
-                        speed_1 = -0x10000 + speed_1
+                    if(speed_0 & 0x80000000):
+                        speed_0 = -0x100000000 + speed_0
+                    if(speed_1 & 0x80000000):
+                        speed_1 = -0x100000000 + speed_1
 
                     return accel_0, accel_1, est_speed_0, est_speed_1, speed_0, speed_1
 

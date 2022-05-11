@@ -99,29 +99,29 @@ void StepperESP::readInitParam(){
 			    && !init_checklist&0x01)
 			{	
 				Serial.read();
-				int8_t data[6];
-				for(int i = 5; i >= 0; i--){
+				int8_t data[16];
+				for(int i = 15; i >= 0; i--){
 					data[i] = Serial.read();
 				}
-				int16_t *accel_ = (int16_t *)(&data[4]);
-				int16_t *decel_ = (int16_t *)(&data[2]);
-				int16_t *brake_ = (int16_t *)(&data[0]);
-				setAccelerationProfile(*accel_, *decel_, *brake_);
+				int32_t *accel_ = (int32_t *)(&data[12]);
+				int32_t *decel_ = (int32_t *)(&data[8]);
+				int32_t *brake_ = (int32_t *)(&data[4]);
+				int32_t *weak_accel = (int32_t *)(&data[0]);
+				
+				setAccelerationProfile(*accel_, *decel_, *brake_, *weak_accel);
 				init_checklist = init_checklist|0x01;
 			}
 			else if((cmd == header.READ_DYNAMIC_ACCEL_CFG)
 			          && !(init_checklist&0x02))
 			{	
 				Serial.read();
-				int8_t data[6];
-				for(int i = 5; i >= 0; i--){
+				int8_t data[8];
+				for(int i = 7; i >= 0; i--){
 					data[i] = Serial.read();
 				}
-				decel_divisor = *(int16_t *)(&data[2]);
-				use_dynamic_accel = *(boolean *)(&data[5]);
-				send_full = *(boolean *)(&data[4]);
-				int16_t *weak_accel_ = (int16_t *)(&data[0]);
-				acceleration_val[0] = *weak_accel_;
+				max_acceleration = *(int32_t*)(&data[4]);
+				decel_divisor = *(int16_t*)(&data[2]);
+				accel_divisor = *(int16_t*)(&data[0]);
 				init_checklist = init_checklist|0x02;
 			}
 			else if((cmd == header.READ_UPDATE_PERIOD_CFG) 
@@ -158,7 +158,8 @@ void StepperESP::readInitParam(){
 		Serial.print(acceleration_val[1]); Serial.print(" ");
 		Serial.print(acceleration_val[2]); Serial.print(" ");
 		Serial.print(acceleration_val[3]); Serial.print(" ");
-		Serial.print(use_dynamic_accel); Serial.print(" ");
+		Serial.print(max_acceleration); Serial.print(" ");
+		Serial.print(accel_divisor); Serial.print(" ");
 		Serial.print(decel_divisor); Serial.print(" ");
 		Serial.println(dt);
 		disableTx = false;
@@ -207,18 +208,20 @@ void StepperESP::initializeStepperEncoder()
 	stepper[0]->setDirectionPin(dir_pin[0]);
 	stepper[0]->setEnablePin(enable_pin);
 	stepper[0]->setAutoEnable(true);
-	stepper[0]->setDelayToDisable(10000);
+	// stepper[0]->setDelayToDisable(10000);
 	stepper[0]->setAcceleration(7500);
-	stepper[0]->setSpeedInHz(0);
+	stepper[0]->stopMove();
+	// stepper[0]->applySpeedAcceleration();
 	stepper[0]->runForward();
 
 	stepper[1] = engine.stepperConnectToPin(clk_pin[1]);
 	stepper[1]->setDirectionPin(dir_pin[1]);
 	stepper[1]->setEnablePin(enable_pin);
 	stepper[1]->setAutoEnable(true);
-	stepper[1]->setDelayToDisable(10000);
+	// stepper[1]->setDelayToDisable(10000);
 	stepper[1]->setAcceleration(7500);
-	stepper[1]->setSpeedInHz(0);
+	stepper[1]->stopMove();
+	// stepper[1]->applySpeedAcceleration();
 	stepper[1]->runForward();
 
 	// digitalWrite(enable_pin, LOW);
@@ -298,32 +301,46 @@ void StepperESP::setSpeedAccel(int16_t speed0, int16_t speed1)
 
 	}
 }
-void StepperESP::setSpeed(int16_t speed0, int16_t speed1)
+void StepperESP::setSpeed(int32_t speed0, int32_t speed1)
 {
 	if(!re_init)
-	{	
-		set_tick_speed[0] = speed0;
-		set_tick_speed[1] = speed1;
-		uint16_t ab_speed0 = abs(speed0);
-		uint16_t ab_speed1 = abs(speed1);
-		int32_t accel0 = 0;
-		int32_t accel1 = 0;
+	{
+		if(abs(set_tick_speed[0] - speed0) > 20)
+		{
+			set_tick_speed[0] = speed0;
+			new_speed_flag = true;
+		}
+		if(abs(set_tick_speed[1] - speed1) > 20)
+		{
+			set_tick_speed[1] = speed1;
+			new_speed_flag = true;
+		}
+
+		uint32_t ab_speed0 = abs(speed0);
+		uint32_t ab_speed1 = abs(speed1);
 		// Avoid step commands that are too small
-		boolean dir0 = speed0 > 0;
-		boolean dir1 = speed1 > 0;
-
-		setDirection(dir0 > 0, dir1 > 0);
 		if (ab_speed0 < 20)
+		{
 			stepper[0]->stopMove();
+		}
 		else
+		{
 			stepper[0]->setSpeedInHz(ab_speed0);
-
+		}
 		if (ab_speed1 < 20)
+		{
 			stepper[1]->stopMove();
+		}
 		else
+		{
 			stepper[1]->setSpeedInHz(ab_speed1);
+		}
+		dir[0] = speed0 > 0;
+		dir[1] = speed1 > 0;
+		setDirection(dir[0] > 0, dir[1] > 0);
 	}
 }
+
 uint8_t StepperESP::SetAccelerationMode(int16_t speed, FastAccelStepper *stepper)
 {
 	if (stepper->getCurrentSpeedInUs() == 0)
@@ -413,14 +430,14 @@ uint8_t StepperESP::SetAccelerationMode(int stepper_no)
 		deceleration_flag[stepper_no] = false;
 		return SPEED_SCENARIO::BRAKE;
 	}
+	if (set_tick_speed[stepper_no] <= 100)
+	{
+		return SPEED_SCENARIO::BRAKE;
+	}
+	// tick_speed_est[stepper_no] = stepper[stepper_no]->getCurrentSpeedInMilliHz()/1000;
 	if (tick_speed_est[stepper_no] == 0)
 	{
 		return SPEED_SCENARIO::ACCEL;
-	}
-
-	if (stepper[stepper_no]->getSpeedInMilliHz() <= 100)
-	{
-		return SPEED_SCENARIO::BRAKE;
 	}
 
 	uint8_t ramp_state = stepper[stepper_no]->rampState() & RAMP_STATE_MASK;
@@ -456,35 +473,65 @@ void StepperESP::SetDynamicAcceleration()
 	uint8_t accel_mode0 = SetAccelerationMode(0);
 	uint8_t accel_mode1 = SetAccelerationMode(1);
 
-	if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
-	{	
-		if(use_dynamic_accel)
+	// if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
+	// {	
+	// 	if(use_dynamic_accel)
+	// 	{
+	// 		if (brake_flag == false)
+	// 		{
+	// 			tick_accel[0] = abs(stepper[0]->getCurrentSpeedInMilliHz()) / (decel_divisor^2); //Todo: a configurable variable
+	// 			tick_accel[1] = abs(stepper[1]->getCurrentSpeedInMilliHz()) / (decel_divisor^2); //Todo: a configurable variable
+	// 			brake_flag = true;
+	// 		}
+	// 		setAcceleration(tick_accel[0], tick_accel[1]);
+	// 	}
+	// 	else
+	// 	{
+	// 		setAcceleration(acceleration_val[SPEED_SCENARIO::BRAKE],
+	// 					acceleration_val[SPEED_SCENARIO::BRAKE]);
+	// 	}
+		
+	// }
+	// else
+	// {
+	brake_flag = false;
+	if(new_speed_flag)
+	{
+		new_speed_flag = false;
+		int8_t accel_flag;
+		if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
 		{
-			if (brake_flag == false)
-			{
-				tick_accel[0] = stepper[0]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
-				tick_accel[1] = stepper[1]->getCurrentSpeedInMilliHz() / decel_divisor; //Todo: a configurable variable
-				brake_flag = true;
-			}
-			setAcceleration(tick_accel[0], tick_accel[1]);
+			accel_flag = accel_mode0;
 		}
 		else
 		{
-			setAcceleration(acceleration_val[SPEED_SCENARIO::BRAKE],
-						acceleration_val[SPEED_SCENARIO::BRAKE]);
+			accel_flag = min(accel_mode0, accel_mode1);
 		}
-		
-	}
-	else
-	{
-		brake_flag = false;
-		int8_t accel_flag = min(accel_mode0, accel_mode1);
-		tick_accel[0] = acceleration_val[accel_flag];
-		tick_accel[1] = acceleration_val[accel_flag];
-		setAcceleration(tick_accel[0], 
-						tick_accel[1]);
-	}
+		uint32_t max_accel = acceleration_val[accel_flag];
+		int32_t tick_accel_temp0 = abs(set_tick_speed[0] - tick_speed_est[0])*1000/accel_divisor;
+		int32_t tick_accel_temp1 = abs(set_tick_speed[1] - tick_speed_est[1])*1000/accel_divisor;
+		float divisor;
+		if(tick_accel_temp0 >= tick_accel_temp1)
+		{
+			divisor = (float)max_accel/tick_accel_temp0;
+		}
+		else
+		{
+			divisor = (float)max_accel/tick_accel_temp1;
+		}
+		tick_accel[0] = tick_accel_temp0*divisor;
+		tick_accel[1] = tick_accel_temp1*divisor;
+		Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+		Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
+		Serial.print(divisor); Serial.print(" ");
+		Serial.print(tick_accel_temp0); Serial.print(" ");
+		Serial.println(tick_accel_temp1);
+		setAcceleration(tick_accel[0],tick_accel[1]);
 
+	}
+		
+	// }
+	// setDirection(dir[0], dir[1]);
 }
 void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
 {
@@ -493,15 +540,23 @@ void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
 }
 void StepperESP::setDirection(boolean dir0, boolean dir1)
 {
-	if (dir0 == true)
+	if (dir0 == true){
 		stepper[0]->runForward();
-	else
+	}
+	else{
 		stepper[0]->runBackward();
+	}
+	stepper[0]->applySpeedAcceleration();
 
-	if (dir1 == true)
+
+	if (dir1 == true){
 		stepper[1]->runForward();
+	}
 	else
+	{
 		stepper[1]->runBackward();
+	}
+	stepper[1]->applySpeedAcceleration();
 }
 void StepperESP::motorControl()
 {
@@ -517,10 +572,12 @@ void StepperESP::motorControl()
 			stepper[0]->setSpeedInHz(motors_vel[0]);
 			if (motors_fw[0] == true)
 			{
+				stepper[0]->applySpeedAcceleration();
 				stepper[0]->runForward();
 			}
 			else
 			{
+				stepper[0]->applySpeedAcceleration();
 				stepper[0]->runBackward();
 			}
 		}
@@ -535,10 +592,13 @@ void StepperESP::motorControl()
 			stepper[1]->setSpeedInHz(motors_vel[1]);
 			if (motors_fw[1] == true)
 			{
+			
+				stepper[1]->applySpeedAcceleration();
 				stepper[1]->runForward();
 			}
 			else
 			{
+				stepper[1]->applySpeedAcceleration();
 				stepper[1]->runBackward();
 			}
 		}

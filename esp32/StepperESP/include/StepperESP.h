@@ -77,14 +77,16 @@ public:
      * Acceleration values for Accelerating, Decelerating and Braking.
      * Unit: Ticks/s^2
      */ 
-    uint16_t acceleration_val[4] = {2500, 3000, 5000, 7000}; 
+    uint32_t acceleration_val[4] = {2500, 3000, 5000, 7000};
+    uint32_t max_acceleration = 20000; 
     
     /**
      * Use dynamic acceleration to ensure both wheels stop
      * at the same time when braking.
      */
-    boolean use_dynamic_accel = false;
+    boolean use_dynamic_accel = true;
     bool brake_flag = false;
+    volatile bool new_speed_flag = true;
 
     /**
      * Used to determine the deceleration required so that the wheels.
@@ -94,7 +96,9 @@ public:
      * 
      * deceleration = stepper.getCurrentSpeedInMilliHz() / decel_divisor
      */
-    int16_t decel_divisor = 500;
+    int16_t decel_divisor = 200;
+    int16_t accel_divisor = 500;
+
 
     //-----------------------------------------------------------
     // If deceleration takes too long, the acceleration value
@@ -168,7 +172,7 @@ public:
     /**
      * Set speed 
      */
-    void setSpeed(int16_t speed0, int16_t speed1);
+    void setSpeed(int32_t speed0, int32_t speed1);
 
 
     /**
@@ -197,7 +201,7 @@ public:
     /**
      * Continuously acquire ramp state from the FastAccelStepper libray and determine
      * the required acceleration. Similar to the SetAccelerationMode function, but used
-     * in the main loop instead of when setting speed.
+     * in a task loop instead of when setting speed.
      * @param stepper_no Stepper's number
      * @retval 2 Braking
      * @retval 1 Deceleration
@@ -223,7 +227,8 @@ public:
      * @param decel Deceleration
      * @param brake Braking Deceleration
      */
-    void setAccelerationProfile(int16_t accel, int16_t decel, int16_t brake){
+    void setAccelerationProfile(int32_t accel, int32_t decel, int32_t brake, int32_t weak_accel){
+        acceleration_val[0] = weak_accel;
         acceleration_val[1] = accel;
         acceleration_val[2] = decel;
         acceleration_val[3] = brake;
@@ -273,9 +278,14 @@ public:
         Serial.write((header.SEND_FULL_SPEED_PROFILE>>8) & 0xff);
         Serial.write(header.SEND_FULL_SPEED_PROFILE & 0xff);
 
-        Serial.write((tick_accel[0] >> 8));
+        Serial.write((tick_accel[0] >> 24) & 0xff);
+        Serial.write((tick_accel[0] >> 16) & 0xff);
+        Serial.write((tick_accel[0] >> 8) & 0xff);
         Serial.write(tick_accel[0] & 0xff);
-        Serial.write((tick_accel[1] >> 8));
+
+        Serial.write((tick_accel[1] >> 24) & 0xff);
+        Serial.write((tick_accel[1] >> 16) & 0xff);
+        Serial.write((tick_accel[1] >> 8) & 0xff);
         Serial.write(tick_accel[1] & 0xff);
 
         tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
@@ -291,16 +301,24 @@ public:
         Serial.write((tick_speed_est[1] >> 8) & 0xff);
         Serial.write(tick_speed_est[1] & 0xff);
 
-        Serial.write((tick_speed[0] >> 8) & 0xff);
-        Serial.write(tick_speed[0] & 0xff);
+        // set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
+        // set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
 
-        Serial.write((tick_speed[1] >> 8) & 0xff);
-        Serial.write(tick_speed[1] & 0xff);
+        Serial.write((set_tick_speed[0] >> 24) & 0xff);
+        Serial.write((set_tick_speed[0] >> 16) & 0xff);
+        Serial.write((set_tick_speed[0] >> 8) & 0xff);
+        Serial.write(set_tick_speed[0] & 0xff);
+
+        Serial.write((set_tick_speed[1] >> 24) & 0xff);
+        Serial.write((set_tick_speed[1] >> 16) & 0xff);
+        Serial.write((set_tick_speed[1] >> 8) & 0xff);
+        Serial.write(set_tick_speed[1] & 0xff);
     }
-    volatile int16_t tick_accel[2] = {0, 0};
-    volatile int16_t tick_speed[2] = {0, 0};
+    volatile int32_t tick_accel[2] = {0, 0};
+    volatile int32_t tick_speed[2] = {0, 0};
     volatile int32_t tick_speed_est[2] = {0, 0};
     volatile int32_t set_tick_speed[2] = {0, 0};
+    volatile boolean dir[2] = {true, true};
     volatile int64_t tick_count[2] = {0, 0};
 
     uint8_t accel_mode;

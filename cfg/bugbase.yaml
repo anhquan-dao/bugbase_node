@@ -3,27 +3,26 @@ baudrate: 115200
 timeout: 0.1
 
 base_width: 0.26
-ticks_per_meter: 24525
+ticks_per_meter: 24000
 turn_direction: false
 
 left_inverted: false
-right_inverted: false
+right_inverted: true
 
 no_encoder_operation: false
 left_enc_inverted: true
 right_enc_inverted: true
 wheel_enc_ratio: 1.333
 
-use_dynamic_acceleration: true
-acceleration: 10000
-weak_acceleration: 5000
-deceleration: 15000
-brake_accel:  21000
-deceleration_time_limit: 500 #ms
+weak_acceleration: 1.0 # m/s^2
+acceleration: 2.00001 # m/s^2
+deceleration: 4.0 # m/s^2
+brake_accel:  6.0 # m/s^2
+max_acceleration: 10.0 # m/s^2
+acceleration_time_limit: 500 #ms
+deceleration_time_limit: 200 #ms
 
-update_rate: 60 #Hz
-
-full_speed: true
+update_rate: 20 #Hz
 
 visualizer: false
 

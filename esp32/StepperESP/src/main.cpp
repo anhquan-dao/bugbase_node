@@ -94,7 +94,7 @@ void loop()
 	int buffer_len = Serial.available();
 	if (buffer_len >= 2)
 	{
-		cmd = (Serial.read() << 8) | Serial.peek();
+		cmd = (Serial.read() << 8) | Serial.read();
 		if (cmd == stepper.header.READ_SPEED_CMD)
 		{
 			setSpeed();
@@ -155,18 +155,19 @@ void setSpeed()
 		speed_msg_error += 1;
 		// Serial.println("ERROR!!");
 	}
-	int8_t data[4];
-	for (int i = 3; i >= 0; i--)
+	int8_t data[8];
+	for (int i = 7; i >= 0; i--)
 	{
 		// Serial.read();
 		data[i] = Serial.read();
 	}
 
-	int16_t *speed_1, *speed_2;
-	speed_1 = (int16_t *)(&data[2]);
-	speed_2 = (int16_t *)(&data[0]);
+	int32_t *speed_1, *speed_2;
+	speed_1 = (int32_t *)(&data[4]);
+	speed_2 = (int32_t *)(&data[0]);
 
 	stepper.setSpeed(*speed_1, *speed_2);
+	// stepper.SetDynamicAcceleration();
 
 #ifdef READ_TEST
 	Serial.write((stepper.header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
@@ -192,16 +193,9 @@ void encoder_read_task(void *pvParameters)
 
 		stepper.getEncoderSpeed();
 		
-		stepper.SetDynamicAcceleration();
+		// stepper.SetDynamicAcceleration();
 
-		if(stepper.send_full)
-		{
-			stepper.sendSpeedProfile();
-		}
-		else
-		{	
-			stepper.sendEncoderSpeed();
-		}
+		stepper.sendSpeedProfile();
 		
 		
 	}
