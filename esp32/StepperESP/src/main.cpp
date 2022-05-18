@@ -77,70 +77,66 @@ void loop()
 	static uint64_t timeout;
 	static uint64_t dt;
 	static boolean timeout_flag;
+	static uint64_t loop_dt;
+	static uint64_t loop_start_timer;
 
-	dt = millis() - timeout;
-	if (dt >= 200)
-	{
-		if (!timeout_flag)
-		{
-			stepper.setSpeed(0, 0);
-		}
-		timeout_flag = true;
-	}
-	else
-	{
-		timeout_flag = false;
-	}
-	int buffer_len = Serial.available();
-	if (buffer_len >= 2)
-	{
-		cmd = (Serial.read() << 8) | Serial.read();
-		if (cmd == stepper.header.READ_SPEED_CMD)
-		{
-			setSpeed();
-			timeout = millis();
-		}
-		else if (cmd == stepper.header.SOFT_RESET) // 0x7954: Reset
+	loop_start_timer = millis();
+	
+	while(Serial.available() < 2){
+		dt = millis() - timeout;
+		if (dt >= 200)
 		{	
-			vTaskSuspend(encoder_read);
-			delay(200);
-			stepper.reset();
-			vTaskResume(encoder_read);
-			timeout = millis();
+			if (!timeout_flag)
+			{	
+				stepper.set_tick_speed[0] = 0;
+				stepper.set_tick_speed[1] = 0;
+			}
+			timeout_flag = true;
+			break;
 		}
+		else
+		{
+			timeout_flag = false;
+		}
+		// stepper.sendCustomMessage("Serial buffer empty");
+		delay(5);
+	}
+	cmd = (cmd << 8) | Serial.read();
+	if (cmd == stepper.header.READ_SPEED_CMD)
+	{
+		setSpeed();
+		stepper.rx_msg_cnt += 1;
+		timeout = millis();
+	}
+	else if (cmd == stepper.header.SOFT_RESET) // 0x7954: Reset
+	{	
+		vTaskSuspend(encoder_read);
+		delay(200);
+		stepper.reset();
+		stepper.rx_msg_cnt += 1;
+		vTaskResume(encoder_read);
+		timeout = millis();
+	}
+	else if (cmd == stepper.header.SHUTDOWN)
+	{
+		stepper.readShutdownRequest();
+		stepper.rx_msg_cnt += 1;
+	}
+	else if (cmd == stepper.header.SEND_PARAMS)
+	{
+		stepper.sendParams();
+		stepper.rx_msg_cnt += 1;
 	}
 
-	// Get state of queue of the two stepper software driver
-	// Report the state 
-	// TODO: Do something with this information
-	// int8_t queue_state = stepper.getQueueState();
-	// switch(queue_state)
-	// {
-	// 	case stepper.QUEUE_STATE::FULL:
-	// 	{
-	// 		char msg[] = "Both stepper queues are full";
-	// 		stepper.sendCustomMessage(msg);
-			
-	// 	}
-	// 		break;
-			
 
-	// 	case stepper.QUEUE_STATE::STEPPER1_FULL:
-	// 	{
-	// 		char msg[] = "Stepper 1 queue is full";
-	// 		stepper.sendCustomMessage(msg);
-	// 	}	
-	// 		break;
-
-	// 	case stepper.QUEUE_STATE::STEPPER0_FULL:
-	// 	{
-	// 		char msg[] = "Stepper 0 queue is full";
-	// 		stepper.sendCustomMessage(msg);
-	// 	}
-	// 		break;
-	// }
-
-	delay(10);
+	stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
+	stepper.SetDynamicAcceleration();
+	if(!stepper.disableTx)
+		// stepper.sendSpeedProfile();
+		;
+	loop_dt = millis() - loop_start_timer;
+	// stepper.sendCustomMessageHeader();
+	// Serial.print("Main Loop runtime: "); Serial.println(loop_dt);	
 }
 
 void setSpeed()
@@ -153,7 +149,7 @@ void setSpeed()
 	else
 	{
 		speed_msg_error += 1;
-		// Serial.println("ERROR!!");
+		// stepper.sendError();
 	}
 	int8_t data[8];
 	for (int i = 7; i >= 0; i--)
@@ -166,8 +162,8 @@ void setSpeed()
 	speed_1 = (int32_t *)(&data[4]);
 	speed_2 = (int32_t *)(&data[0]);
 
-	stepper.setSpeed(*speed_1, *speed_2);
-	// stepper.SetDynamicAcceleration();
+	stepper.set_tick_speed[0] = *speed_1;
+	stepper.set_tick_speed[1] = *speed_2;
 
 #ifdef READ_TEST
 	Serial.write((stepper.header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
@@ -194,8 +190,23 @@ void encoder_read_task(void *pvParameters)
 		stepper.getEncoderSpeed();
 		
 		// stepper.SetDynamicAcceleration();
-
 		stepper.sendSpeedProfile();
+		stepper.sendTotalRxMsg();		
+	}
+}
+void motor_control_task(void *pvParameters)
+{
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+	TickType_t xFrequency = 50 / portTICK_PERIOD_MS;
+
+	for (;;)
+	{	
+		vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+		if(!stepper.disableTx)
+		{
+			
+		}
 		
 		
 	}

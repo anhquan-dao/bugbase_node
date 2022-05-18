@@ -43,7 +43,14 @@ install(TARGETS esp32_message_header
 catkin_install_python(
   PROGRAMS 
     nodes/driver_node.py 
-    nodes/speed_test_node.py 
+    nodes/speed_test_node.py
   DESTINATION
     ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+if(CATKIN_ENABLE_TESTING)
+  # find_package(rostest REQUIRED)
+  # add_rostest(test/rostest.test)
+  catkin_add_nosetests(test/test_weird_float.py)
+endif()
+

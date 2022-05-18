@@ -65,12 +65,14 @@ class BugBaseEncoder:
         vr_enc *= self.motor_encoder_ratio
         vl_enc *= self.motor_encoder_ratio
 
+        # rospy.loginfo("Encoder tick speed: " + str(vr_enc) + "  " + str(vl_enc))
+
         current_time = rospy.Time.now().to_sec()
         dt = current_time - self.last_enc_time
 
         linear_vel = (vr_enc + vl_enc)/(self.TICKS_PER_METER * 2.0)
         angular_vel = (-vr_enc + vl_enc) / \
-            (self.TICKS_PER_METER * self.BASE_WIDTH)
+            (self.TICKS_PER_METER * self.BASE_WIDTH/2.0)
 
         if angular_vel == 0:
             self.current_x += linear_vel*np.cos(self.current_theta)*dt
@@ -107,35 +109,6 @@ class BugBaseEncoder:
 class Node:
 
     def __init__(self, params):
-        # rospy.init_node("bugbase_node")
-        # rospy.on_shutdown(self.shutdown)
-
-        # port_name = rospy.get_param("~port", "/dev/ttyUSB0")
-        # baud_rate = rospy.get_param("~baudrate", 115200)
-        # timeout = rospy.get_param("~timeout", 0.1) # Unit: s
-        # rospy.loginfo("Connecting to ESP board on port {} at baudrate {}".format(
-        #     port_name, baud_rate))
-
-        # base_width = rospy.get_param("~base_width", 0.4948) # Unit: m
-        # ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7) # Unit: ticks/m
-        # left_inverted = rospy.get_param("~left_inverted", True)
-        # right_inverted = rospy.get_param("~right_inverted", True)
-        # turn_direction = rospy.get_param("~turn_direction", True)
-
-        # use_dynamic_acceleration = rospy.get_param(
-        #     "~use_dynamic_acceleration", True)
-        # acceleration = rospy.get_param("~acceleration", 5000) # Unit: ticks/s^2
-        # deceleration = rospy.get_param("~deceleration", 3000) # Unit: ticks/s^2
-        # brake_accel = rospy.get_param("~brake_accel", 7000) # Unit: ticks/s^2
-        # accel_profile = [acceleration, deceleration, brake_accel]
-
-        # decel_time_limit = rospy.get_param("~deceleration_time_limit", 500) # Unit: ms
-
-        # self.update_period = rospy.get_param("~update_period", 50) # Unit: ms
-
-        # left_enc_inverted = rospy.get_param("~left_enc_inverted", False)
-        # right_enc_inverted = rospy.get_param("~right_enc_inverted", True)
-
         rospy.on_shutdown(self.shutdown)
         
         self.update_period = params["update_period"]
@@ -176,13 +149,9 @@ class Node:
 
                     if(read_what == 1):
                         data = self.bugbase.readSpeedProfile()
-                        print(data)
+                        # print(data)
 
                         speed1, speed2 = data[-2:]
-
-                        # TODO: visualize speed profile using matplotlib
-                        if self.visualizer:
-                            self.visualizer.data = data[0]
 
                     # rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 
@@ -192,15 +161,10 @@ class Node:
 
                     self.odom_publisher.publish(
                         self.encoderOdom.calculate_odom(speed1, speed2))
-
-                    if SELFTEST:
-                        self.vr_ticks, self.vl_ticks = np.random.randint(
-                            -7500, 7500), np.random.randint(-7500, 7500)
-                        self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
-                # elif read_what == 1:
-                #     data = self.bugbase.readSpeedProfile()
-                #     print(data)
                     
+                elif read_what == 3:
+                    data = self.bugbase.readbyte()
+                    # print(data)
                 elif read_what == 9:
                     print(self.bugbase.readString())
 
@@ -234,6 +198,8 @@ class Node:
 
         try:
             self.bugbase.setSpeed(0, 0)
+            if(not self.bugbase.sendShutdownRequest()):
+                rospy.logerr("Could not clear buffer!!!")
         except Exception as e:
             rospy.logfatal("Cound not shutdown motors!!!")
             rospy.logfatal(e)

@@ -15,7 +15,7 @@ class ESP32BugBase:
         self.timeout = params["timeout"]
 
         self.is_initialized = False
-
+# ESP32BugBase
         #######################################################
         # User-defined parameters through rosparam
         self.LEFT_INVERTED = params["left_inverted"]
@@ -25,7 +25,7 @@ class ESP32BugBase:
         self.BASE_WIDTH = params["base_width"]
         self.TICKS_PER_METER = params["ticks_per_meter"]
 
-        self.ACCELERATION = params["accel_profile"]
+        self.ACCELERATION = params["accel_profile"][:]
         for i in range(len(self.ACCELERATION)):
             self.ACCELERATION[i] *= self.TICKS_PER_METER
             self.ACCELERATION[i] = int(self.ACCELERATION[i])
@@ -71,15 +71,14 @@ class ESP32BugBase:
             self.ser = serial.Serial(
                 self.port, self.baud, timeout=self.timeout)
             
-            time.sleep(0.5)
+            time.sleep(0.1)
 
             # Get buffer length before sending INIT command
             # Flush all the data from the the buffer length before
             # resetting procedure
             buffer_len = self.ser.in_waiting
+            self.ser.read_all()
             self.send_command(self.MSG_HEADER.SOFT_RESET)
-            self.ser.read(buffer_len)
-            time.sleep(1.0)
 
             header_wait_timer = time.time()
             while True:
@@ -134,24 +133,6 @@ class ESP32BugBase:
             if val2[0]:
                 return (1, val1[1] << 32 | val2[1])
         
-        return (0, 0)
-        
-    
-    def read6(self):
-        val1 = self.readbyte()
-        if val1[0]:
-            val2 = self.readbyte()
-            if val2[0]:
-                val3 = self.readbyte()
-                if val3[0]:
-                    val4 = self.readbyte()
-                    if val4[0]:
-                        val5 = self.readbyte()
-                        if val5[0]:
-                            val6 = self.readbyte()
-                            if val6[0]:
-                                return (1, val1[1] << 40 | val2[1] << 32 | val3[1] << 24 | \
-                                    val4[1] << 16 | val5[1] << 8 | val6[1])
         return (0, 0)
 
     def writebyte(self, val):
@@ -264,12 +245,30 @@ class ESP32BugBase:
         self.writelong((update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
                        (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
     
+    def sendShutdownRequest(self):
+        
+        self.setSpeed(0,0)
+        # Send shutdown request
+        self.send_command(self.MSG_HEADER.SHUTDOWN)
+
+        self.is_initialized = False
+
+ 
+        while self.ser.in_waiting:
+            self.ser.read_all()
+            time.sleep(0.5)
+
+        if self.ser.in_waiting == 0:
+            return True
+
+        print("Buffer: " + str(self.ser.in_waiting))
+
+        return False
+
     def writeInitParam(self):
 
         self.setAcceleration()
-        time.sleep(0.05)
         self.setUpdatePeriod()
-        time.sleep(0.05)
         self.setDynamicAcceleration()
 
     def waitForHeader(self):
@@ -279,7 +278,9 @@ class ESP32BugBase:
         Return value:
         
         0:  Encoder speeds
-        1:  Speed Profile
+        1:  Speed Profile 
+        2:  Params (for debugging)
+        3:  Tx Message Counter
         8:  Init Ready
         9:  Custom message
         10: Error
@@ -311,6 +312,12 @@ class ESP32BugBase:
             if(header1[1] == ((self.MSG_HEADER.READ_FULL_SPEED_PROFILE>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_FULL_SPEED_PROFILE & 0xff)):
                 return 1
+            if(header1[1] == ((self.MSG_HEADER.READ_PARAMS>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_PARAMS & 0xff)):
+                return 2
+            if(header1[1] == ((self.MSG_HEADER.READ_RX_MSG_CNT>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_RX_MSG_CNT & 0xff)):
+                return 3
             if(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
                 return 10
@@ -386,11 +393,11 @@ class ESP32BugBase:
 
     def inv_kinematics(self, linear_x, angular_z):
         if self.TURN_DIRECTION:
-            vr = linear_x - angular_z * self.BASE_WIDTH / 2.0
-            vl = linear_x + angular_z * self.BASE_WIDTH / 2.0
+            vr = linear_x - angular_z * self.BASE_WIDTH / 4.0
+            vl = linear_x + angular_z * self.BASE_WIDTH / 4.0
         else:
-            vr = linear_x + angular_z * self.BASE_WIDTH / 2.0
-            vl = linear_x - angular_z * self.BASE_WIDTH / 2.0
+            vr = linear_x + angular_z * self.BASE_WIDTH / 4.0
+            vl = linear_x - angular_z * self.BASE_WIDTH / 4.0
 
         vr_ticks = int(vr * self.TICKS_PER_METER)
         vl_ticks = int(vl * self.TICKS_PER_METER)

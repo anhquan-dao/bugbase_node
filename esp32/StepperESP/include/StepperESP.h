@@ -52,7 +52,7 @@ public:
     /// Disable message TX during reset
     boolean disableTx = true;
     /// Reinitialization flag
-    boolean re_init = false;
+    boolean re_init = true;
     /// Number of retries when reading initialization parameters before failing
     uint8_t retry_limit = 10;
     /** 
@@ -77,7 +77,7 @@ public:
      * Acceleration values for Accelerating, Decelerating and Braking.
      * Unit: Ticks/s^2
      */ 
-    uint32_t acceleration_val[4] = {2500, 3000, 5000, 7000};
+    uint32_t acceleration_val[5] = {2500, 3000, 5000, 5000, 7000};
     uint32_t max_acceleration = 20000; 
     
     /**
@@ -117,7 +117,8 @@ public:
     // The boundary value between low and high speed range is defined here
 
     // The speed is measured at the encoder, unit: tick/second
-    uint16_t boundary_speed = 5000;
+    uint16_t boundary_speed = 10000;
+    uint16_t boundary_speed2 = 30000;
     // The gear ratio between the motor shaft and encoder shaft
     float motor_enc_ratio = 5;
     // The gear ratio between the wheel shaft and encoder shaft
@@ -129,6 +130,7 @@ public:
         WEAK_ACCEL,
         ACCEL,
         DECEL,
+        STRONG_DECEL,
         BRAKE        
     };
 
@@ -158,6 +160,26 @@ public:
      * TODO: update valid and invalid value 
      */
     void readInitParam();
+
+    void readShutdownRequest()
+    {   
+        disableTx = true;
+        re_init = true;
+        delay(50);
+        // Serial.flush();
+        char buffer[100] = {};
+        while(Serial.available())
+        {   
+            if(Serial.available() < 100)
+            {
+                Serial.readBytes(buffer, Serial.available());
+            }
+            else
+            {
+                Serial.readBytes(buffer, 100);
+            }
+        }
+    }
     
     int8_t getQueueState();
 
@@ -201,16 +223,23 @@ public:
     /**
      * Continuously acquire ramp state from the FastAccelStepper libray and determine
      * the required acceleration. Similar to the SetAccelerationMode function, but used
-     * in a task loop instead of when setting speed.
+     * in a task loop instead of when setting speed. Currently, the strong deceleration is
+     * equal to Braking Acceleration
      * @param stepper_no Stepper's number
-     * @retval 2 Braking
-     * @retval 1 Deceleration
-     * @retval 0 Acceleration
-     * @overload
+     * @retval 4 Braking
+     * @retval 3 Strong Deceleration
+     * @retval 2 Deceleration
+     * @retval 1 Acceleration
+     * @retval 0 Weak Acceleration
      */
-    uint8_t SetAccelerationMode(int stepper_no);
+    uint8_t GetAccelerationMode(int stepper_no);
 
     void SetDynamicAcceleration();
+
+    int8_t GetMotorState(int stepper_no, int32_t &tick_diff, int8_t &direction);
+    void UpdateVelocityRamp();
+    int32_t projected_tick_velocity[2] = {0, 0};
+
 
     /**
      * @brief Set the Acceleration of the output steps
@@ -226,12 +255,14 @@ public:
      * @param accel Acceleration
      * @param decel Deceleration
      * @param brake Braking Deceleration
+     * @param weak_accel Weak Acceleration
      */
     void setAccelerationProfile(int32_t accel, int32_t decel, int32_t brake, int32_t weak_accel){
         acceleration_val[0] = weak_accel;
         acceleration_val[1] = accel;
         acceleration_val[2] = decel;
         acceleration_val[3] = brake;
+        acceleration_val[4] = brake;
     }
 
     void setDirection(boolean dir0, boolean dir1);
@@ -266,60 +297,104 @@ public:
      * @param msg Pointer to the char array
      */
     void sendCustomMessage(const char *msg);
-    void sendError()
+
+    /**
+     * Send human-friendly readable message header. To send the actual
+     * message, use Serial.print and send the "\n" symbol
+     * signal the end of the message right after calling this function. 
+     * Or use Serial.println.
+     */
+    void sendCustomMessageHeader()
     {
-        Serial.write((header.SEND_ERROR>>8) & 0xff);
-        Serial.write(header.SEND_ERROR & 0xff);
-        Serial.write(0x00);
-        Serial.write(0x00);
+        Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
+	    Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
+    }
+    void sendError()
+    {   
+        if(!disableTx)
+        {
+            Serial.write((header.SEND_ERROR>>8) & 0xff);
+            Serial.write(header.SEND_ERROR & 0xff);
+            Serial.write(0x00);
+            Serial.write(0x00);
+        }
+        
     }
     void sendSpeedProfile()
-    {
-        Serial.write((header.SEND_FULL_SPEED_PROFILE>>8) & 0xff);
-        Serial.write(header.SEND_FULL_SPEED_PROFILE & 0xff);
+    {   
+        if(!disableTx)
+        {
+            Serial.write((header.SEND_FULL_SPEED_PROFILE>>8) & 0xff);
+            Serial.write(header.SEND_FULL_SPEED_PROFILE & 0xff);
 
-        Serial.write((tick_accel[0] >> 24) & 0xff);
-        Serial.write((tick_accel[0] >> 16) & 0xff);
-        Serial.write((tick_accel[0] >> 8) & 0xff);
-        Serial.write(tick_accel[0] & 0xff);
+            Serial.write((tick_accel[0] >> 24) & 0xff);
+            Serial.write((tick_accel[0] >> 16) & 0xff);
+            Serial.write((tick_accel[0] >> 8) & 0xff);
+            Serial.write(tick_accel[0] & 0xff);
 
-        Serial.write((tick_accel[1] >> 24) & 0xff);
-        Serial.write((tick_accel[1] >> 16) & 0xff);
-        Serial.write((tick_accel[1] >> 8) & 0xff);
-        Serial.write(tick_accel[1] & 0xff);
+            Serial.write((tick_accel[1] >> 24) & 0xff);
+            Serial.write((tick_accel[1] >> 16) & 0xff);
+            Serial.write((tick_accel[1] >> 8) & 0xff);
+            Serial.write(tick_accel[1] & 0xff);
 
-        tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
-        tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
-       
-        Serial.write((tick_speed_est[0] >> 24) & 0xff);
-        Serial.write((tick_speed_est[0] >> 16) & 0xff);
-        Serial.write((tick_speed_est[0] >> 8) & 0xff);
-        Serial.write(tick_speed_est[0] & 0xff);
+            Serial.write((tick_speed_est[0] >> 24) & 0xff);
+            Serial.write((tick_speed_est[0] >> 16) & 0xff);
+            Serial.write((tick_speed_est[0] >> 8) & 0xff);
+            Serial.write(tick_speed_est[0] & 0xff);
 
-        Serial.write((tick_speed_est[1] >> 24) & 0xff);
-        Serial.write((tick_speed_est[1] >> 16) & 0xff);
-        Serial.write((tick_speed_est[1] >> 8) & 0xff);
-        Serial.write(tick_speed_est[1] & 0xff);
+            Serial.write((tick_speed_est[1] >> 24) & 0xff);
+            Serial.write((tick_speed_est[1] >> 16) & 0xff);
+            Serial.write((tick_speed_est[1] >> 8) & 0xff);
+            Serial.write(tick_speed_est[1] & 0xff);
 
-        // set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
-        // set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
+            // set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
+            // set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
 
-        Serial.write((set_tick_speed[0] >> 24) & 0xff);
-        Serial.write((set_tick_speed[0] >> 16) & 0xff);
-        Serial.write((set_tick_speed[0] >> 8) & 0xff);
-        Serial.write(set_tick_speed[0] & 0xff);
+            Serial.write((tick_speed[0] >> 24) & 0xff);
+            Serial.write((tick_speed[0] >> 16) & 0xff);
+            Serial.write((tick_speed[0] >> 8) & 0xff);
+            Serial.write(tick_speed[0] & 0xff);
 
-        Serial.write((set_tick_speed[1] >> 24) & 0xff);
-        Serial.write((set_tick_speed[1] >> 16) & 0xff);
-        Serial.write((set_tick_speed[1] >> 8) & 0xff);
-        Serial.write(set_tick_speed[1] & 0xff);
+            Serial.write((tick_speed[1] >> 24) & 0xff);
+            Serial.write((tick_speed[1] >> 16) & 0xff);
+            Serial.write((tick_speed[1] >> 8) & 0xff);
+            Serial.write(tick_speed[1] & 0xff);
+        }
     }
-    volatile int32_t tick_accel[2] = {0, 0};
-    volatile int32_t tick_speed[2] = {0, 0};
-    volatile int32_t tick_speed_est[2] = {0, 0};
-    volatile int32_t set_tick_speed[2] = {0, 0};
+    void sendParams()
+    {   
+        if(!disableTx)
+        {
+            Serial.write((header.SEND_PARAMS >> 8) & 0xff);
+            Serial.write(header.SEND_PARAMS & 0xff);
+
+            Serial.print(acceleration_val[0]); Serial.print(" ");
+            Serial.print(acceleration_val[1]); Serial.print(" ");
+            Serial.print(acceleration_val[2]); Serial.print(" ");
+            Serial.print(acceleration_val[3]); Serial.print(" ");
+            
+            Serial.println(dt);
+        }
+    }
+
+    volatile uint8_t rx_msg_cnt = 0; // Reset every Tx cycle
+    void sendTotalRxMsg()
+    {
+        if(!disableTx)
+        {
+            Serial.write((header.SEND_RX_MSG_CNT >> 8) & 0xff);
+            Serial.write(header.SEND_RX_MSG_CNT & 0xff);
+
+            Serial.write(rx_msg_cnt);
+            rx_msg_cnt = 0;
+        }
+    }
+    volatile int32_t tick_accel[2] = {0, 0}; // Tick acceleration to set. Unit: Ticks/s^2
+    volatile int32_t tick_speed[2] = {0, 0}; // Tick speed recorded by the encoder. Unit: Unit: Ticks/s
+    volatile int32_t tick_speed_est[2] = {0, 0}; // Tick speed created by the FastAccelStepper library. Unit: Ticks/s
+    volatile int32_t set_tick_speed[2] = {0, 0}; // Tick speed set by the Python node. Unit: Ticks/s
     volatile boolean dir[2] = {true, true};
-    volatile int64_t tick_count[2] = {0, 0};
+    volatile int64_t tick_count[2] = {0, 0}; // Tick count recorded by the encoder. Unit: Ticks
 
     uint8_t accel_mode;
 
