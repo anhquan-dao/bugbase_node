@@ -50,8 +50,8 @@ class TestWeirdFloat(unittest.TestCase):
             if read_what == 1:
                 data = self.stepper.readSpeedProfile()
 
-                self.assertEqual(data[-1], 0)
-                self.assertEqual(data[-2], 0)
+                self.assertEqual(data[-3], 0)
+                self.assertEqual(data[-4], 0)
 
             if read_what >= 10:
                 timeout_error_cnt += 1

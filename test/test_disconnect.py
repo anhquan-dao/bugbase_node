@@ -34,17 +34,16 @@ class TestDisconnect(unittest.TestCase):
 
     def test_disconnect(self):
         for i in range(10):
-            with self.subTest(i=i):
 
-                self.stepper = ESP32BugBase(default_params)
-                self.assertTrue(self.stepper.connect())
-                
-                time.sleep(0.01)
+            self.stepper = ESP32BugBase(default_params)
+            self.assertTrue(self.stepper.connect())
+            
+            time.sleep(0.01)
 
-                self.assertTrue(self.stepper.sendShutdownRequest())
-                self.assertEqual(self.stepper.ser.in_waiting, 0)
+            self.assertTrue(self.stepper.sendShutdownRequest())
+            self.assertEqual(self.stepper.ser.in_waiting, 0)
 
-                print("---------------------------")
+            print("---------------------------")
 
 
 if __name__ == "__main__":

@@ -149,7 +149,7 @@ class Node:
 
                     if(read_what == 1):
                         data = self.bugbase.readSpeedProfile()
-                        # print(data)
+                        print(data)
 
                         speed1, speed2 = data[-2:]
 

@@ -51,6 +51,6 @@ catkin_install_python(
 if(CATKIN_ENABLE_TESTING)
   # find_package(rostest REQUIRED)
   # add_rostest(test/rostest.test)
-  catkin_add_nosetests(test/test_weird_float.py)
+  catkin_add_nosetests(test)
 endif()
 

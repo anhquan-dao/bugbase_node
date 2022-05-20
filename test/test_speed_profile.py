@@ -60,9 +60,9 @@ class TestSpeedProfile(unittest.TestCase):
                 dt = time.time() - dt_timer
                 accel0, accel1 = data[:2]
 
-                print(data)
-                print(str(data[2] - est_speed0) + " " + str(accel0 * dt))
-                print(str(data[1] - est_speed0) + " " + str(accel0 * dt))
+                # print(data)
+                # print(str(data[2] - est_speed0) + " " + str(accel0 * dt))
+                # print(str(data[1] - est_speed0) + " " + str(accel0 * dt))
 
                 self.assertTrue(abs(data[2] - est_speed0 - accel0 * dt) < 100)
                 self.assertTrue(abs(data[3] - est_speed1 - accel1 * dt) < 100)
