@@ -397,11 +397,11 @@ class ESP32BugBase:
 
     def inv_kinematics(self, linear_x, angular_z):
         if self.TURN_DIRECTION:
-            vr = linear_x - angular_z * self.BASE_WIDTH / 4.0
-            vl = linear_x + angular_z * self.BASE_WIDTH / 4.0
+            vr = linear_x - angular_z * self.BASE_WIDTH / 2.0
+            vl = linear_x + angular_z * self.BASE_WIDTH / 2.0
         else:
-            vr = linear_x + angular_z * self.BASE_WIDTH / 4.0
-            vl = linear_x - angular_z * self.BASE_WIDTH / 4.0
+            vr = linear_x + angular_z * self.BASE_WIDTH / 2.0
+            vl = linear_x - angular_z * self.BASE_WIDTH / 2.0
 
         vr_ticks = int(vr * self.TICKS_PER_METER)
         vl_ticks = int(vl * self.TICKS_PER_METER)

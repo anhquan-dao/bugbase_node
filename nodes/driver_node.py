@@ -72,7 +72,7 @@ class BugBaseEncoder:
 
         linear_vel = (vr_enc + vl_enc)/(self.TICKS_PER_METER * 2.0)
         angular_vel = (-vr_enc + vl_enc) / \
-            (self.TICKS_PER_METER * self.BASE_WIDTH/2.0)
+            (self.TICKS_PER_METER * self.BASE_WIDTH)
 
         if angular_vel == 0:
             self.current_x += linear_vel*np.cos(self.current_theta)*dt
@@ -171,7 +171,8 @@ class Node:
                     print("error")
 
                 elif read_what == 11:
-                    print("timeout")
+                    # print("timeout")
+                    pass
 
             # rate.sleep()
 

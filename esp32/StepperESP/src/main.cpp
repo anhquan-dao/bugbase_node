@@ -58,7 +58,7 @@ void setup()
 		"encoder_read",
 		2000,
 		NULL,
-		0,
+		1,
 		&EncoderTask,
 		1);
 	// xTaskCreatePinnedToCore(
@@ -138,70 +138,6 @@ void loop()
 	stepper.SetDynamicAcceleration();
 	delay(10);
 }
-void serial_read_task(void *pvParameters)
-{	
-	TickType_t xLastWakeTime = xTaskGetTickCount();
-	TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
-	for(;;)
-	{
-		vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-		// Serial.println("Serial Read Task");
-		
-		if(Serial.available() < 1)
-		{	
-			
-			dt = millis() - timeout;
-			if (dt >= 200)
-			{	
-				if (!timeout_flag)
-				{	
-					stepper.set_tick_speed[0] = 0;
-					stepper.set_tick_speed[1] = 0;
-				}
-				timeout_flag = true;
-			}
-			else
-			{
-				timeout_flag = false;
-			}
-		}
-		else
-		{	
-			stepper.sendCustomMessageHeader();
-			Serial.print("\t\t\t\tCommand in RX: ");
-			Serial.println(cmd, HEX);
-			cmd = (cmd << 8) | Serial.read();
-			if((cmd | stepper.header.READ_HEADER))
-			{
-				timeout = millis();
-				if (cmd == stepper.header.READ_SPEED_CMD)
-				{
-					setSpeed();
-					stepper.rx_msg_cnt += 1;
-				}
-				else if (cmd == stepper.header.SOFT_RESET)
-				{	
-					vTaskSuspend(EncoderTask);
-					stepper.reset();
-					vTaskResume(EncoderTask);
-				}
-				else if (cmd == stepper.header.SHUTDOWN)
-				{
-					stepper.readShutdownRequest();
-				}
-				else if (cmd == stepper.header.SEND_PARAMS)
-				{
-					stepper.sendParams();
-				}
-			}
-		}
-
-		stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
-		stepper.SetDynamicAcceleration();
-	}
-	
-}
 
 void setSpeed()
 {
@@ -245,11 +181,14 @@ void encoder_read_task(void *pvParameters)
 
 	for (;;)
 	{	
-		xFrequency = stepper.dt / portTICK_PERIOD_MS;
+		xFrequency = 20 / portTICK_PERIOD_MS;
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-		// Serial.println("                           Encoder Read Task");
-
+		// if(!stepper.disableTx)
+		// {
+		// 	stepper.sendCustomMessageHeader();
+		// 	Serial.println(millis());
+		// }
 		stepper.getEncoderSpeed();
 		stepper.sendEncoderSpeed();	
 
