@@ -15,7 +15,7 @@ class ESP32BugBase:
         self.timeout = params["timeout"]
 
         self.is_initialized = False
-# ESP32BugBase
+ 
         #######################################################
         # User-defined parameters through rosparam
         self.LEFT_INVERTED = params["left_inverted"]
@@ -67,11 +67,15 @@ class ESP32BugBase:
         Establish connection with the ESP32 driver
         Update new params as per roslaunch
         '''
+
+        print(hex(self.MSG_HEADER.READ_ENCODER >> 8))
+        print(hex(self.MSG_HEADER.READ_ENCODER & 0xff))
+        
         try:
             self.ser = serial.Serial(
                 self.port, self.baud, timeout=self.timeout)
             
-            time.sleep(0.1)
+            # time.sleep(0.1)
 
             # Get buffer length before sending INIT command
             # Flush all the data from the the buffer length before
@@ -83,8 +87,9 @@ class ESP32BugBase:
             header_wait_timer = time.time()
             while True:
                 read_what = self.waitForHeader()
+
                 if read_what == 8:
-                    print("Driver ready for initialization")
+                    print("Alright")
                     self.writeInitParam()
                     self.is_initialized = True
                     break
@@ -96,7 +101,6 @@ class ESP32BugBase:
                 if time.time() - header_wait_timer > 2.0:
                     print("Timeout")
                     return False
-                time.sleep(0.01)
 
         except OSError as e:
             return False
@@ -303,22 +307,22 @@ class ESP32BugBase:
             if(header1[1] == ((self.MSG_HEADER.READ_HUMAN_MESSAGE>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_HUMAN_MESSAGE & 0xff)):
                 return 9
-            if(header1[1] == ((self.MSG_HEADER.READ_INIT_READY>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_INIT_READY>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_INIT_READY & 0xff)):
                 return 8
-            if(header1[1] == ((self.MSG_HEADER.READ_ENCODER>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_ENCODER>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ENCODER & 0xff)):
                 return 0
-            if(header1[1] == ((self.MSG_HEADER.READ_FULL_SPEED_PROFILE>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_FULL_SPEED_PROFILE>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_FULL_SPEED_PROFILE & 0xff)):
                 return 1
-            if(header1[1] == ((self.MSG_HEADER.READ_PARAMS>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_PARAMS>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_PARAMS & 0xff)):
                 return 2
-            if(header1[1] == ((self.MSG_HEADER.READ_RX_MSG_CNT>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_RX_MSG_CNT>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_RX_MSG_CNT & 0xff)):
                 return 3
-            if(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
+            elif(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
                 return 10
 

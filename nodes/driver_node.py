@@ -120,7 +120,7 @@ class Node:
             rospy.logfatal("Could not connect to ESP32 board")
             rospy.signal_shutdown("Could not connect to ESP32 board")
 
-        rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback, queue_size=1)
+        self.cmd_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback, queue_size=1)
 
         self.odom_publisher = rospy.Publisher(
             odom_topic, Odometry, queue_size=1)
@@ -149,9 +149,8 @@ class Node:
 
                     if(read_what == 1):
                         data = self.bugbase.readSpeedProfile()
-                        print(data)
-
                         speed1, speed2 = data[-2:]
+                        print(data)
 
                     # rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 
@@ -194,6 +193,8 @@ class Node:
             rospy.logwarn(e.errno)
 
     def shutdown(self):
+        self.cmd_sub.unregister()
+        self.odom_publisher.unregister()
         rospy.loginfo("Shutting down")
 
         try:

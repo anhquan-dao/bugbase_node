@@ -34,34 +34,6 @@ void StepperESP::reset()
 	disableTx = true;
 	re_init = true;
 	init_checklist = 0x00;
-	char msg[] = "Driver resetting .....";
-	sendCustomMessage(msg);
-	// Flusing out all of Serial buffer
-
-	uint64_t flush_timeout = 1000;
-	uint64_t flush_start = millis();
-	while (Serial.available())
-	{
-		if(millis() - flush_start > flush_timeout)
-		{
-			sendError();
-		}
-		Serial.read();
-		delay(10);
-	}
-
-	// Wait 1000ms for both stepper object to clear out entries
-	// uint16_t start = millis();
-	// while (stepper[0]->queueEntries() || stepper[1]->queueEntries())
-	// {
-	// 	if (millis() - start > 1000)
-	// 	{
-	// 		char msg[] = "Queue not clear!!!";
-	// 		sendCustomMessage(msg, 19);
-	// 		// ESP.restart();
-	// 		break;
-	// 	}
-	// }
 
 	sendInitReady();
 	readInitParam();
@@ -69,36 +41,35 @@ void StepperESP::reset()
 
 void StepperESP::sendInitReady()
 {
+	Serial.write(header.SEND_INIT_READY >> 8);
+	Serial.write(header.SEND_INIT_READY & 0xff);
 	Serial.write(0x00);
-	Serial.write(0x78);
-	Serial.write(0x55);
 	Serial.write(0x00);
-	Serial.write(0x00);
-	delay(200);
 }
 
 void StepperESP::readInitParam(){
-	uint16_t wait_time = millis();
-	uint16_t max_wait_time = 500;
-	boolean no_header_flag = false;
+	uint32_t wait_time = millis();
+	uint32_t max_wait_time = 200;
+	int16_t cmd = 0;
+
 	for(int i=0; i<retry_limit && init_checklist != 0x07; i++)
 	{	
 		wait_time = millis();
+		
 		while(Serial.available() < 5)
-		{
-			if(millis() - wait_time < max_wait_time)
-			{
-				no_header_flag = true;
+		{	
+			if((millis() - wait_time) > max_wait_time)
+			{	
 				break;
 			}
 			delay(10);
 		}
-		if(no_header_flag)
-		{
-			sendError();
-			break;
-		}
-		int16_t cmd = (Serial.read() << 8) | Serial.read();
+
+		cmd = (cmd << 8) | Serial.read();
+
+		sendCustomMessageHeader();
+		Serial.println(cmd, HEX);
+
 		if((cmd&0xff00) == header.READ_HEADER)
 		{	
 			if((cmd == header.READ_ACCEL_PROFILE_CFG) 
@@ -145,6 +116,7 @@ void StepperESP::readInitParam(){
 	}
 	if(init_checklist != 0x07)
 	{	
+		sendError();
 		char msg[] = "Failed Initialization";
 		Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
 		Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
@@ -152,7 +124,6 @@ void StepperESP::readInitParam(){
 		Serial.print(init_checklist, HEX);
 		Serial.println();
 		sendCustomMessage(msg);
-		sendError();
 	}
 	else
 	{

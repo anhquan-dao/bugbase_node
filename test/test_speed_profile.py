@@ -34,24 +34,19 @@ class TestSpeedProfile(unittest.TestCase):
 
     def setUp(self):
         self.stepper = ESP32BugBase(default_params)
-        self.assertTrue(self.stepper.connect())
+        self.assertTrue(self.stepper.connect())       
 
     def test_speed_profile(self):
         test_time = 2.0
 
         accel0, accel1 = 0.0, 0.0
         est_speed0, est_speed1 = 0.0, 0.0
+        timeout_error_cnt = 0
 
-        start = time.time()
-        dt_timer = time.time()
-        i = 0
-
-        time.sleep(1)
         start = time.time()
         dt_timer = time.time()
 
         while time.time()-start < test_time:
-
             self.stepper.setSpeed(10000, 10000)
             read_what = self.stepper.waitForHeader()
             if read_what == 1:
@@ -60,22 +55,18 @@ class TestSpeedProfile(unittest.TestCase):
                 dt = time.time() - dt_timer
                 accel0, accel1 = data[:2]
 
-                # print(data)
+                print("Loop time: " + str(dt))
+                print(data)
                 # print(str(data[2] - est_speed0) + " " + str(accel0 * dt))
                 # print(str(data[1] - est_speed0) + " " + str(accel0 * dt))
 
-                self.assertTrue(abs(data[2] - est_speed0 - accel0 * dt) < 100)
-                self.assertTrue(abs(data[3] - est_speed1 - accel1 * dt) < 100)
+                # self.assertTrue(abs(data[2] - est_speed0 - accel0 * dt) < 100)
+                # self.assertTrue(abs(data[3] - est_speed1 - accel1 * dt) < 100)
                 
                 est_speed0, est_speed1 = data[2:4]
                 accel0, accel1 = data[:2]
 
                 dt_timer = time.time()
-
-            elif read_what == 11:
-                self.fail("Timeout error")
-
-            i += 1
 
             
 

@@ -22,7 +22,7 @@ max_acceleration: 10.0 # m/s^2
 acceleration_time_limit: 500 #ms
 deceleration_time_limit: 200 #ms
 
-update_rate: 60 #Hz
+update_rate: 10  #Hz
 
 visualizer: false
 

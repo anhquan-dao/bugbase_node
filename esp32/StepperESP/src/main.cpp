@@ -21,8 +21,8 @@ const uint8_t ENCODER_A[2] = {39, 36};
 const uint8_t ENCODER_B[2] = {34, 35};
 
 StepperESP stepper;
-TaskHandle_t motor_control;
-TaskHandle_t encoder_read;
+TaskHandle_t SerialTask;
+TaskHandle_t EncoderTask;
 
 uint8_t speed_msg_cnt = 0;
 uint8_t accel_msg_cnt = 0;
@@ -30,7 +30,7 @@ uint8_t speed_msg_error = 0;
 uint8_t encoder_msg_cnt = 0;
 
 //----------------------------------------------------------------------
-void motor_control_task(void *pvParameters);
+void serial_read_task(void *pvParameters);
 void encoder_read_task(void *pvParameters);
 void setSpeed();
 void setAcceleration();
@@ -42,8 +42,8 @@ void setup()
 {
 	Serial.begin(115200);
 
-	pinMode(2, INPUT_PULLUP);
-	pinMode(4, INPUT_PULLUP);
+	pinMode(ENCODER_A[0], INPUT_PULLUP); pinMode(ENCODER_A[1], INPUT_PULLUP);
+	pinMode(ENCODER_B[0], INPUT_PULLUP); pinMode(ENCODER_B[1], INPUT_PULLUP);
 
 	stepper.setClockPin(STEP_A_PIN, STEP_B_PIN);
 	stepper.setDirectionPin(DIR_A_PIN, DIR_B_PIN);
@@ -56,33 +56,37 @@ void setup()
 	xTaskCreatePinnedToCore(
 		encoder_read_task,
 		"encoder_read",
-		20000,
+		2000,
 		NULL,
-		1,
-		&encoder_read,
+		0,
+		&EncoderTask,
 		1);
+	// xTaskCreatePinnedToCore(
+	// 	serial_read_task,
+	// 	"serial_read",
+	// 	200000,
+	// 	NULL,
+	// 	1,
+	// 	&SerialTask,
+	// 	0);
 	delay(200);
 }
 
 //----------------------------------------------------------------------
 
-float i = 0;
-bool decreasing = false;
-
 int16_t cmd = 0;
-char buffer[2] = {};
+uint64_t timeout, dt;
+boolean timeout_flag;
+uint64_t loop_dt, loop_start_timer;
+boolean full_loop_flag = false;
+
+boolean test_flag = false;
 
 void loop()
-{
-	static uint64_t timeout;
-	static uint64_t dt;
-	static boolean timeout_flag;
-	static uint64_t loop_dt;
-	static uint64_t loop_start_timer;
-
-	loop_start_timer = millis();
-	
-	while(Serial.available() < 2){
+{	
+	if(Serial.available() < 1)
+	{	
+		
 		dt = millis() - timeout;
 		if (dt >= 200)
 		{	
@@ -92,51 +96,111 @@ void loop()
 				stepper.set_tick_speed[1] = 0;
 			}
 			timeout_flag = true;
-			break;
 		}
 		else
 		{
 			timeout_flag = false;
 		}
-		// stepper.sendCustomMessage("Serial buffer empty");
-		delay(5);
 	}
-	cmd = (cmd << 8) | Serial.read();
-	if (cmd == stepper.header.READ_SPEED_CMD)
-	{
-		setSpeed();
-		stepper.rx_msg_cnt += 1;
-		timeout = millis();
-	}
-	else if (cmd == stepper.header.SOFT_RESET) // 0x7954: Reset
+	else
 	{	
-		vTaskSuspend(encoder_read);
-		delay(200);
-		stepper.reset();
-		stepper.rx_msg_cnt += 1;
-		vTaskResume(encoder_read);
-		timeout = millis();
-	}
-	else if (cmd == stepper.header.SHUTDOWN)
-	{
-		stepper.readShutdownRequest();
-		stepper.rx_msg_cnt += 1;
-	}
-	else if (cmd == stepper.header.SEND_PARAMS)
-	{
-		stepper.sendParams();
-		stepper.rx_msg_cnt += 1;
-	}
+		cmd = (cmd << 8) | Serial.read();
 
+		if((cmd | stepper.header.READ_HEADER))
+		{
+			timeout = millis();
+			if (cmd == stepper.header.READ_SPEED_CMD)
+			{
+				setSpeed();
+				stepper.rx_msg_cnt += 1;
+			}
+			else if (cmd == stepper.header.SOFT_RESET)
+			{	
+				stepper.sendCustomMessageHeader();
+				vTaskSuspend(EncoderTask);
+				stepper.reset();
+				vTaskResume(EncoderTask);
+				stepper.sendCustomMessageHeader();
+				Serial.println(stepper.disableTx);
+			}
+			else if (cmd == stepper.header.SHUTDOWN)
+			{
+				stepper.readShutdownRequest();
+			}
+			else if (cmd == stepper.header.SEND_PARAMS)
+			{
+				stepper.sendParams();
+			}
+		}
+	}
 
 	stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
 	stepper.SetDynamicAcceleration();
-	if(!stepper.disableTx)
-		// stepper.sendSpeedProfile();
-		;
-	loop_dt = millis() - loop_start_timer;
-	// stepper.sendCustomMessageHeader();
-	// Serial.print("Main Loop runtime: "); Serial.println(loop_dt);	
+	delay(10);
+}
+void serial_read_task(void *pvParameters)
+{	
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+	TickType_t xFrequency = 20 / portTICK_PERIOD_MS;
+	for(;;)
+	{
+		vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+		// Serial.println("Serial Read Task");
+		
+		if(Serial.available() < 1)
+		{	
+			
+			dt = millis() - timeout;
+			if (dt >= 200)
+			{	
+				if (!timeout_flag)
+				{	
+					stepper.set_tick_speed[0] = 0;
+					stepper.set_tick_speed[1] = 0;
+				}
+				timeout_flag = true;
+			}
+			else
+			{
+				timeout_flag = false;
+			}
+		}
+		else
+		{	
+			stepper.sendCustomMessageHeader();
+			Serial.print("\t\t\t\tCommand in RX: ");
+			Serial.println(cmd, HEX);
+			cmd = (cmd << 8) | Serial.read();
+			if((cmd | stepper.header.READ_HEADER))
+			{
+				timeout = millis();
+				if (cmd == stepper.header.READ_SPEED_CMD)
+				{
+					setSpeed();
+					stepper.rx_msg_cnt += 1;
+				}
+				else if (cmd == stepper.header.SOFT_RESET)
+				{	
+					vTaskSuspend(EncoderTask);
+					stepper.reset();
+					vTaskResume(EncoderTask);
+				}
+				else if (cmd == stepper.header.SHUTDOWN)
+				{
+					stepper.readShutdownRequest();
+				}
+				else if (cmd == stepper.header.SEND_PARAMS)
+				{
+					stepper.sendParams();
+				}
+			}
+		}
+
+		stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
+		stepper.SetDynamicAcceleration();
+	}
+	
 }
 
 void setSpeed()
@@ -154,7 +218,6 @@ void setSpeed()
 	int8_t data[8];
 	for (int i = 7; i >= 0; i--)
 	{
-		// Serial.read();
 		data[i] = Serial.read();
 	}
 
@@ -166,12 +229,11 @@ void setSpeed()
 	stepper.set_tick_speed[1] = *speed_2;
 
 #ifdef READ_TEST
-	Serial.write((stepper.header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
-	Serial.write(stepper.header.SEND_HUMAN_MESSAGE & 0xff);
+	stepper.sendCustomMessageHeader();
 	Serial.print("Motor Speed: ");
-	Serial.print(*speed_1);
+	Serial.print(stepper.set_tick_speed[0]);
 	Serial.print(" ");
-	Serial.print(*speed_2);
+	Serial.print(stepper.set_tick_speed[1]);
 	Serial.println();
 #endif
 }
@@ -182,32 +244,14 @@ void encoder_read_task(void *pvParameters)
 	TickType_t xFrequency = stepper.dt / portTICK_PERIOD_MS;
 
 	for (;;)
-	{
+	{	
 		xFrequency = stepper.dt / portTICK_PERIOD_MS;
-		
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+		// Serial.println("                           Encoder Read Task");
 
 		stepper.getEncoderSpeed();
-		
-		// stepper.SetDynamicAcceleration();
-		stepper.sendSpeedProfile();
-		stepper.sendTotalRxMsg();		
-	}
-}
-void motor_control_task(void *pvParameters)
-{
-	TickType_t xLastWakeTime = xTaskGetTickCount();
-	TickType_t xFrequency = 50 / portTICK_PERIOD_MS;
+		stepper.sendEncoderSpeed();	
 
-	for (;;)
-	{	
-		vTaskDelayUntil(&xLastWakeTime, xFrequency);
-
-		if(!stepper.disableTx)
-		{
-			
-		}
-		
-		
 	}
 }
