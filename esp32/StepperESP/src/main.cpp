@@ -38,6 +38,16 @@ void setAcceleration();
 /// Deprecated method
 void setAccelerationMode();
 
+
+struct AMessage
+{	
+	int32_t accel[2];
+	int32_t set_tick_speed[2];
+};
+
+struct AMessage xMessage;
+QueueHandle_t xQueue1;
+
 void setup()
 {
 	Serial.begin(115200);
@@ -53,6 +63,8 @@ void setup()
 
 	stepper.initializeStepperEncoder();
 
+	xQueue1 = xQueueCreate(32, sizeof(struct AMessage));
+
 	xTaskCreatePinnedToCore(
 		encoder_read_task,
 		"encoder_read",
@@ -60,7 +72,7 @@ void setup()
 		NULL,
 		1,
 		&EncoderTask,
-		1);
+		0);
 	// xTaskCreatePinnedToCore(
 	// 	serial_read_task,
 	// 	"serial_read",
@@ -89,17 +101,9 @@ void loop()
 		
 		dt = millis() - timeout;
 		if (dt >= 200)
-		{	
-			if (!timeout_flag)
-			{	
-				stepper.set_tick_speed[0] = 0;
-				stepper.set_tick_speed[1] = 0;
-			}
-			timeout_flag = true;
-		}
-		else
-		{
-			timeout_flag = false;
+		{		
+			stepper.set_tick_speed[0] = 0;
+			stepper.set_tick_speed[1] = 0;
 		}
 	}
 	else
@@ -136,7 +140,45 @@ void loop()
 
 	stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
 	stepper.SetDynamicAcceleration();
-	delay(10);
+
+	xMessage.set_tick_speed[0] = stepper.set_tick_speed[0];
+	xMessage.set_tick_speed[1] = stepper.set_tick_speed[1];
+
+	xMessage.accel[0] = stepper.tick_accel[0];
+	xMessage.accel[1] = stepper.tick_accel[1];
+
+	// if(!stepper.re_init)
+	// {
+	// 	xQueueSend(xQueue1, &xMessage, portMAX_DELAY);
+
+	// }
+	if(!stepper.disableTx)
+	{
+		Serial.write(stepper.header.SEND_DEBUG_MSG >> 8);
+		Serial.write(stepper.header.SEND_DEBUG_MSG & 0xff);
+
+		Serial.write((stepper.tick_accel[0] >> 24));
+		Serial.write((stepper.tick_accel[0] >> 16));
+		Serial.write((stepper.tick_accel[0] >> 8));
+		Serial.write(stepper.tick_accel[0] & 0xff);
+
+		Serial.write((stepper.tick_accel[1] >> 24) & 0xff);
+		Serial.write((stepper.tick_accel[1] >> 16) & 0xff);
+		Serial.write((stepper.tick_accel[1] >> 8) & 0xff);
+		Serial.write(stepper.tick_accel[1] & 0xff);
+
+		Serial.write((stepper.tick_speed_est[0] >> 24) & 0xff);
+		Serial.write((stepper.tick_speed_est[0] >> 16) & 0xff);
+		Serial.write((stepper.tick_speed_est[0] >> 8) & 0xff);
+		Serial.write(stepper.tick_speed_est[0] & 0xff);
+
+		Serial.write((stepper.tick_speed_est[1] >> 24) & 0xff);
+		Serial.write((stepper.tick_speed_est[1] >> 16) & 0xff);
+		Serial.write((stepper.tick_speed_est[1] >> 8) & 0xff);
+		Serial.write(stepper.tick_speed_est[1] & 0xff);
+
+	}
+	delay(5);
 }
 
 void setSpeed()
@@ -179,15 +221,27 @@ void encoder_read_task(void *pvParameters)
 	TickType_t xLastWakeTime = xTaskGetTickCount();
 	TickType_t xFrequency = stepper.dt / portTICK_PERIOD_MS;
 
+	struct AMessage rcvMessage;
+	int32_t set_tick_speed[2];
 	for (;;)
 	{	
 		xFrequency = 20 / portTICK_PERIOD_MS;
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
+		if(!stepper.re_init)
+		{
+			if(xQueueReceive(xQueue1, &rcvMessage, 0))
+			{
+				stepper.sendCustomMessage("Receive queue");
+			}
+		}
+
 		// if(!stepper.disableTx)
 		// {
 		// 	stepper.sendCustomMessageHeader();
-		// 	Serial.println(millis());
+		// 	Serial.print("Test Queue: ");
+		// 	Serial.print(rcvMessage.set_tick_speed[0]); Serial.print(" ");
+		// 	Serial.println(rcvMessage.set_tick_speed[1]);			
 		// }
 		stepper.getEncoderSpeed();
 		stepper.sendEncoderSpeed();	

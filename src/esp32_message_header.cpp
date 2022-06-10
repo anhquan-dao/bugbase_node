@@ -11,6 +11,7 @@ class ROSInterfaceMessageHeader
         const int16_t READ_HUMAN_MESSAGE    = ESP32MessageHeader::SEND_HUMAN_MESSAGE;
         const int16_t READ_INIT_READY       = ESP32MessageHeader::SEND_INIT_READY;
         const int16_t READ_FULL_SPEED_PROFILE = ESP32MessageHeader::SEND_FULL_SPEED_PROFILE;
+        const int16_t READ_DEBUG_MSG        = ESP32MessageHeader::SEND_DEBUG_MSG;
         const int16_t READ_PARAMS           = ESP32MessageHeader::SEND_PARAMS;
         const int16_t READ_RX_MSG_CNT       = ESP32MessageHeader::SEND_RX_MSG_CNT;
         
@@ -38,6 +39,7 @@ BOOST_PYTHON_MODULE(esp32_message_header)
         .def_readonly("READ_HEADER", &ROSInterfaceMessageHeader::READ_HEADER)
         .def_readonly("READ_ENCODER", &ROSInterfaceMessageHeader::READ_ENCODER)
         .def_readonly("READ_FULL_SPEED_PROFILE", &ROSInterfaceMessageHeader::READ_FULL_SPEED_PROFILE)
+        .def_readonly("READ_DEBUG_MSG", &ROSInterfaceMessageHeader::READ_DEBUG_MSG)        
         .def_readonly("READ_PARAMS", &ROSInterfaceMessageHeader::READ_PARAMS)
         .def_readonly("READ_ERROR", &ROSInterfaceMessageHeader::READ_ERROR)
         .def_readonly("READ_HUMAN_MESSAGE", &ROSInterfaceMessageHeader::READ_HUMAN_MESSAGE)

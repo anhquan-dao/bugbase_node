@@ -12,6 +12,7 @@ class ESP32MessageHeader
 
         static const int16_t SEND_ENCODER          = 0x7857;
         static const int16_t SEND_FULL_SPEED_PROFILE = 0x7869;
+        static const int16_t SEND_DEBUG_MSG        = 0x7870;
         static const int16_t SEND_ERROR            = 0x7890;
         static const int16_t SEND_HUMAN_MESSAGE    = 0x7877;
         static const int16_t SEND_INIT_READY       = 0x7855;

@@ -285,6 +285,7 @@ class ESP32BugBase:
         1:  Speed Profile 
         2:  Params (for debugging)
         3:  Tx Message Counter
+        4:  Speed debug message
         8:  Init Ready
         9:  Custom message
         10: Error
@@ -322,6 +323,9 @@ class ESP32BugBase:
             elif(header1[1] == ((self.MSG_HEADER.READ_RX_MSG_CNT>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_RX_MSG_CNT & 0xff)):
                 return 3
+            elif(header1[1] == ((self.MSG_HEADER.READ_DEBUG_MSG>>8) & 0xff)
+            and header2[1] == (self.MSG_HEADER.READ_DEBUG_MSG & 0xff)):
+                return 4
             elif(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
             and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
                 return 10
@@ -393,8 +397,25 @@ class ESP32BugBase:
 
                     return accel_0, accel_1, est_speed_0, est_speed_1, speed_0, speed_1
 
+    def readSpeedDebug(self):
+        data = self.read8()
+        if(data[0]):
+            accel_0 = (data[1]>>32) & 0xffffffff
+            accel_1 = data[1] & 0xffffffff
+        
+            data = self.read8()
+            if(data[0]):
+                est_speed_0 = (data[1] >> 32) & 0xffffffff
+                est_speed_1 = data[1] & 0xffffffff
 
+                # Convert 4 bytes unsigned to 4 bytes signed
+                if(est_speed_0 & 0x80000000):
+                    est_speed_0 = -0x100000000 + est_speed_0
+                if(est_speed_1 & 0x80000000):
+                    est_speed_1 = -0x100000000 + est_speed_1
 
+                return accel_0, accel_1, est_speed_0, est_speed_1
+                
     def inv_kinematics(self, linear_x, angular_z):
         if self.TURN_DIRECTION:
             vr = linear_x - angular_z * self.BASE_WIDTH / 2.0

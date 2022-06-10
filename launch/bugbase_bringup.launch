@@ -41,11 +41,11 @@
   <arg name="port" value="/dev/ttyUSB_BNOimu"/>
   <arg name="topic" value="/imu/data"/>
 
-  <!-- <node pkg="bno055_usb_stick" type="bno055_usb_stick_node" name="bno055_node">
+  <node pkg="bno055_usb_stick" type="bno055_usb_stick_node" name="bno055_node">
     <param name="port" value="$(arg port)" />
     <remap from="/imu" to="$(arg topic)"/>
-    < VERY IMPORTANT PARAMS 
-    Do not change without consulting the owner(s) of this repo >
+    <!-- VERY IMPORTANT PARAMS 
+    Do not change without consulting the owner(s) of this repo -->
     <param name="publish_tf" value="false" />
     <param name="~frame_id" value="base_link" />
 
@@ -119,6 +119,6 @@
                                                          0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    1e-9, 0,
                                                          0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    1e-9]
           </rosparam>
-    </node> -->
+    </node>
 
 </launch>

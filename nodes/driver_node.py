@@ -5,6 +5,8 @@ import rospy
 import tf as ros_tf
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+import diagnostic_updater
+import diagnostic_msgs
 
 import numpy as np
 import serial
@@ -103,8 +105,7 @@ class BugBaseEncoder:
 
         self.last_enc_time = current_time
 
-        return self.odom
-
+        return self.odom        
 
 class Node:
 
@@ -135,6 +136,15 @@ class Node:
         else:
             self.visualizer = None
 
+        
+        self.updater = diagnostic_updater.Updater()
+        self.updater.setHardwareID("none")
+
+        self.updater.add("Function updater", self.dummy_diagnostic)
+
+        self.diag_accel = [0, 0]
+        self.diag_speed = [0, 0]
+
     def run(self):
         rospy.loginfo("Starting motor driver")
         
@@ -164,6 +174,10 @@ class Node:
                 elif read_what == 3:
                     data = self.bugbase.readbyte()
                     # print(data)
+
+                elif read_what == 4:
+                    self.diag_accel[0], self.diag_accel[1], self.diag_speed[0], self.diag_speed[1] = self.bugbase.readSpeedDebug()
+
                 elif read_what == 9:
                     print(self.bugbase.readString())
 
@@ -174,6 +188,8 @@ class Node:
                     # print("timeout")
                     pass
 
+            self.updater.update()
+
             # rate.sleep()
 
     def cmd_callback(self, data):
@@ -182,7 +198,7 @@ class Node:
             if not READTEST:
                 self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(
                     data.linear.x, data.angular.z)
-                # rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
+                rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
                 if not SELFTEST:
                     self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 
@@ -192,6 +208,19 @@ class Node:
 
         except OSError as e:
             rospy.logwarn(e.errno)
+
+    def dummy_diagnostic(self, stat):
+
+        stat.summary(diagnostic_msgs.msg.DiagnosticStatus.OK, "Nothing to report")
+        stat.add("Acceleration 0", self.diag_accel[0])
+        stat.add("Acceleration 1", self.diag_accel[1])
+        stat.add("Est Speed 0", self.diag_speed[0])
+        stat.add("Est Speed 1", self.diag_speed[1])
+
+        stat.add("Actual Speed 0", self.vl_ticks)
+        stat.add("Actual Speed 1", self.vr_ticks)
+
+        return stat
 
     def shutdown(self):
         self.cmd_sub.unregister()
