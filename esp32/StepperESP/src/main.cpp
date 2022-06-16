@@ -49,6 +49,7 @@ typedef struct AMessage
 AMessage xMessage;
 QueueHandle_t xQueue1;
 
+
 void setup()
 {
 	Serial.begin(115200);
@@ -124,13 +125,15 @@ void loop()
 			{	
 				// stepper.sendCustomMessageHeader();
 				// Serial.println();
+				vTaskSuspend(EncoderTask);
 				stepper.reset();
 				vTaskResume(EncoderTask);
+				stepper.sendCustomMessage("Resume normal operation");
 			}
 			else if (cmd == stepper.header.SHUTDOWN)
 			{
 				stepper.readShutdownRequest();
-				vTaskSuspend(EncoderTask);
+				xQueueReset(xQueue1);
 			}
 		}
 	}
@@ -220,10 +223,10 @@ void encoder_read_task(void *pvParameters)
 				set_tick_vel[0] = rcvMessage.set_tick_vel[0];
 				set_tick_vel[1] = rcvMessage.set_tick_vel[1];
 			}
-		}
-
+		}	
 		stepper.getEncoderSpeed();
-		stepper.sendSpeedProfile(est_tick_vel[0], est_tick_vel[1], set_tick_accel[0], set_tick_accel[1]);	
+		stepper.sendSpeedProfile(est_tick_vel[0], est_tick_vel[1], set_tick_accel[0], set_tick_accel[1]);
+		
 
 	}
 }

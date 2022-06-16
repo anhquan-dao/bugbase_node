@@ -68,7 +68,20 @@ void StepperESP::readInitParam(){
 			delay(10);
 		}
 
-		cmd = (cmd << 8) | Serial.read();
+		while(Serial.available() > 5)
+		{
+			if((millis() - wait_time) > max_wait_time)
+			{	
+				break;
+			}
+			cmd = (cmd << 8) | Serial.read();
+			if((cmd&0xff00) == MSG_HEADER::READ_HEADER)
+			{
+				break;
+			}
+			delay(10);
+		}
+		
 
 		if((cmd&0xff00) == MSG_HEADER::READ_HEADER)
 		{	
@@ -140,8 +153,6 @@ void StepperESP::readInitParam(){
 		disableTx = false;
 		re_init = false;
 	}
-	
-	// ESP.restart();
 }
 int8_t StepperESP::getQueueState(){
 	boolean queue0 = stepper[0]->isQueueFull();
