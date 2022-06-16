@@ -54,6 +54,9 @@
   <test_depend>rosunit</test_depend>
   <build_depend>rostest</build_depend>
 
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
+
 
 
   <!-- The export tag contains other, unspecified, tags -->

@@ -1,9 +1,9 @@
 port: '/dev/ttyUSB0'
-baudrate: 115200
+baud: 115200
 timeout: 0.1
 
 base_width: 0.49
-ticks_per_meter: 3841.5
+ticks_per_meter: 1700
 turn_direction: false
 
 left_inverted: true
@@ -12,18 +12,35 @@ right_inverted: false
 no_encoder_operation: false
 left_enc_inverted: false
 right_enc_inverted: false
-wheel_enc_ratio: 3.5526
+wheel_enc_ratio: 1.0
+motor_enc_ratio: 5.34
+wheel_motor_ratio: 9.62
 
-weak_acceleration: 0.8 # m/s^2
-acceleration: 1.0 # m/s^2
-deceleration: 2.0 # m/s^2
-brake_accel:  2.5 # m/s^2
-max_acceleration: 10.0 # m/s^2
-acceleration_time_limit: 500 #ms
-deceleration_time_limit: 200 #ms
+weak_acceleration: 0.4 # m/s^2
+acceleration: 0.8 # m/s^2
+deceleration: 1.2 # m/s^2
+brake_accel:  2.0 # m/s^2
 
-update_rate: 10  #Hz
+accel_boundary_speed: 0.2 # m/s
+decel_boundary_speed: 0.5 # m/s
 
-visualizer: false
+
+update_rate: 60  #Hz
+
+visualizer: true
 
 odom_topic: '/odom/wheel'
+
+playground_enable: false
+# ==================================
+# TEST PARAMETERS
+angular_acceleration: 0.5 # rad/s
+
+# ==================================
+
+# ==================================
+# DEPRECATED PARAMETERS
+max_acceleration: 10.0 # m/s^2
+accel_time_limit: 500 #ms
+decel_time_limit: 200 #ms
+# ==================================

@@ -24,13 +24,17 @@ class ESP32BugBase:
 
         self.BASE_WIDTH = params["base_width"]
         self.TICKS_PER_METER = params["ticks_per_meter"]
+        self.MOTOR_ENC_RATIO = params["motor_enc_ratio"]
 
         self.ACCELERATION = params["accel_profile"][:]
         for i in range(len(self.ACCELERATION)):
-            self.ACCELERATION[i] *= self.TICKS_PER_METER
+            self.ACCELERATION[i] *= self.TICKS_PER_METER * self.MOTOR_ENC_RATIO
             self.ACCELERATION[i] = int(self.ACCELERATION[i])
 
-        self.MAX_ACCELERATION = int(params["max_acceleration"]*self.TICKS_PER_METER)
+        self.ACCEL_BOUNDARY_SPEED = int(params["accel_boundary_speed"]*self.TICKS_PER_METER*self.MOTOR_ENC_RATIO)
+        self.DECEL_BOUNDARY_SPEED = int(params["decel_boundary_speed"]*self.TICKS_PER_METER*self.MOTOR_ENC_RATIO)
+        
+        self.MAX_ACCELERATION = int(params["max_acceleration"]*self.TICKS_PER_METER*self.MOTOR_ENC_RATIO)
         self.ACCEL_TIME = params["accel_time_limit"]
         self.DECEL_TIME = params["decel_time_limit"]
         self.UPDATE_PERIOD = params["update_period"]
@@ -46,11 +50,25 @@ class ESP32BugBase:
         self.error_count = 0
         self.max_header_try = 20
 
+        self.vr_ticks, self.vl_ticks = 0, 0
+
+        self.header1, self.header2 = (0, 0), (0, 0)
+        self.MSG_HEADER = ESP32Header.ROSInterfaceMessageHeader()
+
+        #================================
+        # PLAYGROUND SECTION
+
+        self.PLAYGROUND_ENABLE = params["playground_enable"]
+
         # Differentiate acceleration and deceleration following Khue's suggestion
+        self.vel_timer = time.time()
+        self.ANGULAR_ACCELERATION = params["angular_acceleration"]
+        
+        self.angular_z = 0
+        self.prev_linear_x, self.prev_angular_z = 0, 0
         self.prev_vr_ticks = 0
         self.prev_vl_ticks = 0
-
-        self.MSG_HEADER = ESP32Header.ROSInterfaceMessageHeader()
+        #================================
 
     class Cmd():
         SETSPEED = 0x4D01
@@ -67,9 +85,6 @@ class ESP32BugBase:
         Establish connection with the ESP32 driver
         Update new params as per roslaunch
         '''
-
-        print(hex(self.MSG_HEADER.READ_ENCODER >> 8))
-        print(hex(self.MSG_HEADER.READ_ENCODER & 0xff))
         
         try:
             self.ser = serial.Serial(
@@ -80,8 +95,8 @@ class ESP32BugBase:
             # Get buffer length before sending INIT command
             # Flush all the data from the the buffer length before
             # resetting procedure
-            buffer_len = self.ser.in_waiting
-            self.ser.read_all()
+            # buffer_len = self.ser.in_waiting
+            # self.ser.read_all()
             self.send_command(self.MSG_HEADER.SOFT_RESET)
 
             header_wait_timer = time.time()
@@ -94,7 +109,8 @@ class ESP32BugBase:
                     self.is_initialized = True
                     break
                 if read_what == 9:
-                    print(self.readString())
+                    # print(self.readString())
+                    pass
                 if read_what == 10:
                     print("error")
                     return False
@@ -220,18 +236,17 @@ class ESP32BugBase:
 
     def setDynamicAcceleration(self, dynamic_accel_cfg = None):
         if dynamic_accel_cfg == None:
-            dynamic_accel_cfg = [self.MAX_ACCELERATION,
-                                 self.ACCEL_TIME,
-                                 self.DECEL_TIME]
+            dynamic_accel_cfg = [self.ACCEL_BOUNDARY_SPEED,
+                                 self.DECEL_BOUNDARY_SPEED]
 
-        max_acceleration, accel_time, decel_time = dynamic_accel_cfg
+        accel_bound, decel_bound = dynamic_accel_cfg
 
         self.send_command(self.MSG_HEADER.WRITE_DYNAMIC_ACCEL_CFG)
         self.writebyte(0x00)
-        self.writelong((max_acceleration >> 24) & 0xff, (max_acceleration >> 16 & 0xff),
-                       (max_acceleration >> 8) & 0xff, (max_acceleration & 0xff))
-        self.writeshort((accel_time >>8) & 0xff, (accel_time & 0xff))
-        self.writeshort((decel_time >>8) & 0xff, (decel_time & 0xff))
+        self.writelong((accel_bound >> 24) & 0xff, (accel_bound >> 16 & 0xff),
+                       (accel_bound >> 8) & 0xff, (accel_bound & 0xff))
+        self.writelong((decel_bound >> 24) & 0xff, (decel_bound >> 16 & 0xff),
+                       (decel_bound >> 8) & 0xff, (decel_bound & 0xff))
 
     def setUpdatePeriod(self, update_rate = None):
         
@@ -292,7 +307,7 @@ class ESP32BugBase:
         11: Timeout
         """
 
-        header1, header2 = (0, 0), (0, 0)
+        header_2byte = 0
         header_try_timer = time.time()
         empty_buffer_timer = time.time()
         while True:
@@ -302,35 +317,29 @@ class ESP32BugBase:
                 # Wait for the set update period, tolerance 10%
                 time.sleep((self.UPDATE_PERIOD*1.1)/1000.0) 
 
-            header2 = self.readbyte()
-            # print("{} {}".format(hex(header1[1]), hex(header2[1])))
+            self.header2 = self.readbyte()
+            # print("{} {}".format(hex(self.header1[1]), hex(self.header2[1])))
 
-            if(header1[1] == ((self.MSG_HEADER.READ_HUMAN_MESSAGE>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_HUMAN_MESSAGE & 0xff)):
+            header_2byte = (self.header1[1]<<8) | self.header2[1]
+            
+            if(header_2byte == self.MSG_HEADER.READ_HUMAN_MESSAGE):
                 return 9
-            elif(header1[1] == ((self.MSG_HEADER.READ_INIT_READY>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_INIT_READY & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_INIT_READY):
                 return 8
-            elif(header1[1] == ((self.MSG_HEADER.READ_ENCODER>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_ENCODER & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_ENCODER):
                 return 0
-            elif(header1[1] == ((self.MSG_HEADER.READ_FULL_SPEED_PROFILE>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_FULL_SPEED_PROFILE & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_FULL_SPEED_PROFILE):
                 return 1
-            elif(header1[1] == ((self.MSG_HEADER.READ_PARAMS>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_PARAMS & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_PARAMS):
                 return 2
-            elif(header1[1] == ((self.MSG_HEADER.READ_RX_MSG_CNT>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_RX_MSG_CNT & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_RX_MSG_CNT):
                 return 3
-            elif(header1[1] == ((self.MSG_HEADER.READ_DEBUG_MSG>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_DEBUG_MSG & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_DEBUG_MSG):
                 return 4
-            elif(header1[1] == ((self.MSG_HEADER.READ_ERROR>>8) & 0xff)
-            and header2[1] == (self.MSG_HEADER.READ_ERROR & 0xff)):
+            elif(header_2byte == self.MSG_HEADER.READ_ERROR):
                 return 10
 
-            header1 = header2
+            self.header1 = self.header2
             if(time.time() -  header_try_timer > 0.1):
                 return 11
 
@@ -415,8 +424,10 @@ class ESP32BugBase:
                     est_speed_1 = -0x100000000 + est_speed_1
 
                 return accel_0, accel_1, est_speed_0, est_speed_1
-                
+
     def inv_kinematics(self, linear_x, angular_z):
+        
+        self.angular_z, self.linear_x = angular_z, linear_x
         if self.TURN_DIRECTION:
             vr = linear_x - angular_z * self.BASE_WIDTH / 2.0
             vl = linear_x + angular_z * self.BASE_WIDTH / 2.0
@@ -424,16 +435,27 @@ class ESP32BugBase:
             vr = linear_x + angular_z * self.BASE_WIDTH / 2.0
             vl = linear_x - angular_z * self.BASE_WIDTH / 2.0
 
-        vr_ticks = int(vr * self.TICKS_PER_METER)
-        vl_ticks = int(vl * self.TICKS_PER_METER)
+        self.vr_ticks = int(vr * self.TICKS_PER_METER * self.MOTOR_ENC_RATIO)
+        self.vl_ticks = int(vl * self.TICKS_PER_METER * self.MOTOR_ENC_RATIO)
         ##########################################
 
         if self.RIGHT_INVERTED:
-            vr_ticks = -vr_ticks
+            self.vr_ticks = -self.vr_ticks
         if self.LEFT_INVERTED:
-            vl_ticks = -vl_ticks
+            self.vl_ticks = -self.vl_ticks            
+            
+        return self.vr_ticks, self.vl_ticks
 
-        return vr_ticks, vl_ticks
+    def test_acceleration_setting(self):
+        if self.PLAYGROUND_ENABLE:
+            dt = time.time() - self.vel_timer
+            d_angular = angular_z - self.prev_angular_z
+            if(abs(d_angular)/dt > self.ANGULAR_ACCELERATION):
+                if(d_angular > 0):
+                    angular_z = self.prev_angular_z + self.ANGULAR_ACCELERATION * dt
+                else:
+                    angular_z = self.prev_angular_z - self.ANGULAR_ACCELERATION * dt
+
 
     def __del__(self):
         self.ser.close()

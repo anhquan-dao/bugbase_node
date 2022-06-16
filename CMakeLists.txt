@@ -1,16 +1,24 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(bugbase_node)
 
-find_package(catkin REQUIRED COMPONENTS rospy)
+find_package(catkin REQUIRED COMPONENTS rospy message_generation)
 find_package(Boost REQUIRED COMPONENTS python)
 find_package(PythonLibs REQUIRED)
 
 catkin_python_setup()
 
+add_message_files(
+  FILES
+  BugbaseMotor.msg
+  BugbaseMotorArray.msg
+)
+
+generate_messages()
+
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES bugbase_driver esp32_message_header
-  CATKIN_DEPENDS rospy
+  CATKIN_DEPENDS rospy message_runtime
 )
 
 include_directories(
@@ -51,6 +59,6 @@ catkin_install_python(
 if(CATKIN_ENABLE_TESTING)
   # find_package(rostest REQUIRED)
   # add_rostest(test/rostest.test)
-  catkin_add_nosetests(test/test_speed_profile.py)
+  catkin_add_nosetests(test/test_disconnect.py)
 endif()
 

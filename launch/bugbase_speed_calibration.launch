@@ -3,7 +3,7 @@
     <rosparam command="load" file="$(find bugbase_node)/cfg/bugbase.yaml" />
 	</node>
   
-  <!-- <node pkg="bugbase_node" type="speed_test_node.py" name="speed_test_node" output="screen"></node> -->
+  <node pkg="bugbase_node" type="speed_test_node.py" name="speed_test_node" output="screen"></node>
   
 
 </launch>

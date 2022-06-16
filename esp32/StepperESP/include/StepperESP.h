@@ -13,6 +13,8 @@
 #define DRIVER_ADDRESS 0b00 // TMC2209 Driver address according to MS1 and MS2
 #define R_SENSE 0.11f
 
+typedef ESP32MessageHeader MSG_HEADER;
+
 class StepperESP
 {
 public:
@@ -26,10 +28,11 @@ public:
 
     uint8_t encoderA[2], encoderB[2];
 
-    ESP32MessageHeader header;
+    MSG_HEADER header;
 
-    //----------------------------------------------------------
-    // Parameters used in old communication method
+    
+    // Parameters used in deprecated communication method
+    //================================
     char received_arr[19];
     char left_received_arr[8];
     char right_received_arr[8];
@@ -43,33 +46,29 @@ public:
     char receivedChars[numChars];
 
     boolean newData = false;
-    //----------------------------------------------------------  
+    //================================
 
 
-    //----------------------------------------------------------
     // Initialization variables
+    //================================
 
-    /// Disable message TX during reset
+    // Disable message TX during reset. Set to true during resetting
     boolean disableTx = true;
-    /// Reinitialization flag
+    // Reinitialization flag. Set to true during resetting
     boolean re_init = true;
-    /// Number of retries when reading initialization parameters before failing
+    // Number of retries when reading initialization parameters before failing
     uint8_t retry_limit = 10;
-    /** 
-     * Initialization update header for update messages
-     * 
-     * 0x56: acceleration profile
-     * 
-     * 0x57: dynamic acceleration configuration
-     * 
-     * 0x58: udpate rate
-     */
-    const int8_t init_updatelist[3] = {0x56, 0x57, 0x58};
+    // Bit field for checking configuration message 
     uint8_t init_checklist = 0x00;
 
-    boolean send_full;
+    enum QUEUE_STATE{
+        STEPPER0_FULL,
+        STEPPER1_FULL,
+        FULL,
+        OK
+    };
 
-    //----------------------------------------------------------
+    //================================
 
     uint8_t encoder_msg_cnt = 0;
 
@@ -79,7 +78,34 @@ public:
      */ 
     uint32_t acceleration_val[5] = {2500, 3000, 5000, 5000, 7000};
     uint32_t max_acceleration = 20000; 
-    
+
+
+    //-----------------------------------------------------------
+    // During low speed, the acceleration will be lower to induce more torque
+    // While during high speed, the acceleration will be higher.
+    // The boundary value between low and high speed range is defined here
+    // The speed is measured at the encoder, unit: tick/second
+
+    // Boundary Speed when accelerating from 0
+    uint32_t boundary_speed = 2000;
+    // Boundary Speed when decelerating to 0
+    uint32_t boundary_speed2 = 6000;
+    //-----------------------------------------------------------
+
+    enum SPEED_SCENARIO
+    {   
+        WEAK_ACCEL,
+        ACCEL,
+        DECEL,
+        STRONG_DECEL,
+        BRAKE        
+    };
+
+
+    // Variables used in deprecated methods of determining acceleration
+    //===================================
+
+        
     /**
      * Use dynamic acceleration to ensure both wheels stop
      * at the same time when braking.
@@ -89,7 +115,10 @@ public:
     volatile bool new_speed_flag = true;
 
     /**
-     * Used to determine the deceleration required so that the wheels.
+     * This variable is used in deprecated method. 
+     * Used to determine the deceleration required so that the wheels 
+     * stops within specified interval.
+     *
      * Unit: ms
      * 
      * Formula: 
@@ -98,7 +127,6 @@ public:
      */
     int16_t decel_divisor = 200;
     int16_t accel_divisor = 500;
-
 
     //-----------------------------------------------------------
     // If deceleration takes too long, the acceleration value
@@ -111,35 +139,8 @@ public:
     uint16_t deceleration_time_limit = 100;
     //-----------------------------------------------------------
 
-    //-----------------------------------------------------------
-    // During low speed, the acceleration will be lower to induce more torque
-    // While during high speed, the acceleration will be higher.
-    // The boundary value between low and high speed range is defined here
+    //===================================
 
-    // The speed is measured at the encoder, unit: tick/second
-    uint16_t boundary_speed = 10000;
-    uint16_t boundary_speed2 = 30000;
-    // The gear ratio between the motor shaft and encoder shaft
-    float motor_enc_ratio = 5;
-    // The gear ratio between the wheel shaft and encoder shaft
-    float wheel_enc_ratio = 1.333;
-    //-----------------------------------------------------------
-
-    enum SPEED_SCENARIO
-    {   
-        WEAK_ACCEL,
-        ACCEL,
-        DECEL,
-        STRONG_DECEL,
-        BRAKE        
-    };
-
-    enum QUEUE_STATE{
-        STEPPER0_FULL,
-        STEPPER1_FULL,
-        FULL,
-        OK
-    };
 
     StepperESP();
     ~StepperESP();
@@ -161,33 +162,14 @@ public:
      */
     void readInitParam();
 
-    void readShutdownRequest()
-    {   
-        disableTx = true;
-        re_init = true;
-        delay(50);
-        // Serial.flush();
-        char buffer[100] = {};
-        while(Serial.available())
-        {   
-            if(Serial.available() < 100)
-            {
-                Serial.readBytes(buffer, Serial.available());
-            }
-            else
-            {
-                Serial.readBytes(buffer, 100);
-            }
-        }
-    }
+    void readShutdownRequest();
     
     int8_t getQueueState();
 
     void getEncoderSpeed();
 
     /**
-     * Set speed and determine the acceleration based on the set speed. 
-     * This function is subject to change.
+     * This method is deprecated. Set speed and determine the acceleration based on the set speed. 
      */
     void setSpeedAccel(int16_t speed0, int16_t speed1);
 
@@ -198,8 +180,7 @@ public:
 
 
     /**
-     * Determine "Speed Scenario" based on set speed.
-     * This method is deprecated and is kept until the set acceleration method is finalized
+     * This method is deprecated.. Determine "Speed Scenario" based on set speed.
      * @param speed   Stepper's speed
      * @param stepper Pointer to the stepper
      * @retval 2 Braking
@@ -221,10 +202,10 @@ public:
     uint8_t SetAccelerationMode(int16_t speed, int stepper_no);
 
     /**
-     * Continuously acquire ramp state from the FastAccelStepper libray and determine
+     * This method is deprecated. Continuously acquire ramp state from the FastAccelStepper libray and determine
      * the required acceleration. Similar to the SetAccelerationMode function, but used
      * in a task loop instead of when setting speed. Currently, the strong deceleration is
-     * equal to Braking Acceleration
+     * equal to Braking Acceleration. 
      * @param stepper_no Stepper's number
      * @retval 4 Braking
      * @retval 3 Strong Deceleration
@@ -234,11 +215,30 @@ public:
      */
     uint8_t GetAccelerationMode(int stepper_no);
 
+    //---------------------------------------------
+    /**
+     * This method is deprecated. Instead of determining the acceleration,
+     * the velocity ramp is controlled directly.
+     */
+
+    // Update the velocity ramp 
+    void UpdateVelocityRamp();
+    // Get the state of the FastAccelStepper library
+    int8_t GetMotorState(int stepper_no, int32_t &tick_diff, int8_t &direction);
+    
+    int32_t projected_tick_velocity[2] = {0, 0};
+
+    //---------------------------------------------
+
+
+    /**
+     * Continuously acquire ramp state from the FastAccelStepper libray and determine
+     * the required acceleration. Similar to the SetAccelerationMode function, but used
+     * in a task loop instead of when setting speed.
+     */
     void SetDynamicAcceleration();
 
-    int8_t GetMotorState(int stepper_no, int32_t &tick_diff, int8_t &direction);
-    void UpdateVelocityRamp();
-    int32_t projected_tick_velocity[2] = {0, 0};
+
 
 
     /**
@@ -269,28 +269,7 @@ public:
     void motorControl();
     void recvWithStartEndMarkers();
 
-    void SetAccelerationDivisor(uint8_t accel_div);
-
-    void getEncoderCount()
-    {
-        tick_count[0] = encoder[0].getCount();
-        tick_count[1] = encoder[1].getCount();
-    }
-
-    void sendEncoderSpeed()
-    {
-        if(!disableTx)
-        {
-            Serial.write((header.SEND_ENCODER >> 8) & 0xff);
-            Serial.write(header.SEND_ENCODER & 0xff);
-            Serial.write(encoder_msg_cnt);
-            Serial.write((tick_speed[0] >> 8) & 0xff);
-            Serial.write(tick_speed[0] & 0xff);
-            Serial.write((tick_speed[1] >> 8) & 0xff);
-            Serial.write(tick_speed[1] & 0xff);
-            encoder_msg_cnt += 1;
-        }
-    }
+    void sendEncoderSpeed();
 
     /**
      * @brief Send human-friendly readable message
@@ -304,99 +283,20 @@ public:
      * signal the end of the message right after calling this function. 
      * Or use Serial.println.
      */
-    void sendCustomMessageHeader()
-    {
-        Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
-	    Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
-    }
-    void sendError()
-    {   
-        if(!disableTx)
-        {
-            Serial.write((header.SEND_ERROR>>8) & 0xff);
-            Serial.write(header.SEND_ERROR & 0xff);
-            Serial.write(0x00);
-            Serial.write(0x00);
-        }
-        
-    }
-    void sendSpeedProfile()
-    {   
-        if(!disableTx)
-        {
-            Serial.write((header.SEND_FULL_SPEED_PROFILE>>8) & 0xff);
-            Serial.write(header.SEND_FULL_SPEED_PROFILE & 0xff);
+    void sendCustomMessageHeader();
 
-            Serial.write((tick_accel[0] >> 24) & 0xff);
-            Serial.write((tick_accel[0] >> 16) & 0xff);
-            Serial.write((tick_accel[0] >> 8) & 0xff);
-            Serial.write(tick_accel[0] & 0xff);
-
-            Serial.write((tick_accel[1] >> 24) & 0xff);
-            Serial.write((tick_accel[1] >> 16) & 0xff);
-            Serial.write((tick_accel[1] >> 8) & 0xff);
-            Serial.write(tick_accel[1] & 0xff);
-
-            Serial.write((tick_speed_est[0] >> 24) & 0xff);
-            Serial.write((tick_speed_est[0] >> 16) & 0xff);
-            Serial.write((tick_speed_est[0] >> 8) & 0xff);
-            Serial.write(tick_speed_est[0] & 0xff);
-
-            Serial.write((tick_speed_est[1] >> 24) & 0xff);
-            Serial.write((tick_speed_est[1] >> 16) & 0xff);
-            Serial.write((tick_speed_est[1] >> 8) & 0xff);
-            Serial.write(tick_speed_est[1] & 0xff);
-
-            // set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
-            // set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
-
-            Serial.write((tick_speed[0] >> 24) & 0xff);
-            Serial.write((tick_speed[0] >> 16) & 0xff);
-            Serial.write((tick_speed[0] >> 8) & 0xff);
-            Serial.write(tick_speed[0] & 0xff);
-
-            Serial.write((tick_speed[1] >> 24) & 0xff);
-            Serial.write((tick_speed[1] >> 16) & 0xff);
-            Serial.write((tick_speed[1] >> 8) & 0xff);
-            Serial.write(tick_speed[1] & 0xff);
-        }
-    }
-    void sendParams()
-    {   
-        if(!disableTx)
-        {
-            Serial.write((header.SEND_PARAMS >> 8) & 0xff);
-            Serial.write(header.SEND_PARAMS & 0xff);
-
-            Serial.print(acceleration_val[0]); Serial.print(" ");
-            Serial.print(acceleration_val[1]); Serial.print(" ");
-            Serial.print(acceleration_val[2]); Serial.print(" ");
-            Serial.print(acceleration_val[3]); Serial.print(" ");
-            
-            Serial.println(dt);
-        }
-    }
+    void sendError();
+    void sendSpeedProfile();
+    void sendSpeedProfile(int32_t est_tick_vel0, int32_t est_tick_vel1, int32_t set_tick_accel0, int32_t set_tick_accel1);
 
     volatile uint8_t rx_msg_cnt = 0; // Reset every Tx cycle
-    void sendTotalRxMsg()
-    {
-        if(!disableTx)
-        {
-            Serial.write((header.SEND_RX_MSG_CNT >> 8) & 0xff);
-            Serial.write(header.SEND_RX_MSG_CNT & 0xff);
 
-            Serial.write(rx_msg_cnt);
-            rx_msg_cnt = 0;
-        }
-    }
     volatile int32_t tick_accel[2] = {0, 0}; // Tick acceleration to set. Unit: Ticks/s^2
     volatile int32_t tick_speed[2] = {0, 0}; // Tick speed recorded by the encoder. Unit: Unit: Ticks/s
     volatile int32_t tick_speed_est[2] = {0, 0}; // Tick speed created by the FastAccelStepper library. Unit: Ticks/s
     volatile int32_t set_tick_speed[2] = {0, 0}; // Tick speed set by the Python node. Unit: Ticks/s
     volatile boolean dir[2] = {true, true};
     volatile int64_t tick_count[2] = {0, 0}; // Tick count recorded by the encoder. Unit: Ticks
-
-    uint8_t accel_mode;
 
     float dt = 50; // microseconds
 };

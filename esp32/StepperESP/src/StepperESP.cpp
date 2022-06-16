@@ -6,6 +6,9 @@ StepperESP::StepperESP()
 StepperESP::~StepperESP()
 {
 }
+
+//   BASIC SETTINGS
+//===================================
 void StepperESP::setEnablePin(uint8_t enable_pin_)
 {
 	enable_pin = enable_pin_;
@@ -29,6 +32,8 @@ void StepperESP::setEncoderPin(const uint8_t encoderA_[2], const uint8_t encoder
 	encoderB[1] = encoderB_[1];
 }
 
+//   (RE)INITIALIZATION SECTION
+//===================================
 void StepperESP::reset()
 {	
 	disableTx = true;
@@ -38,15 +43,13 @@ void StepperESP::reset()
 	sendInitReady();
 	readInitParam();
 }
-
 void StepperESP::sendInitReady()
 {
-	Serial.write(header.SEND_INIT_READY >> 8);
-	Serial.write(header.SEND_INIT_READY & 0xff);
+	Serial.write(MSG_HEADER::SEND_INIT_READY >> 8);
+	Serial.write(MSG_HEADER::SEND_INIT_READY & 0xff);
 	Serial.write(0x00);
 	Serial.write(0x00);
 }
-
 void StepperESP::readInitParam(){
 	uint32_t wait_time = millis();
 	uint32_t max_wait_time = 200;
@@ -67,12 +70,9 @@ void StepperESP::readInitParam(){
 
 		cmd = (cmd << 8) | Serial.read();
 
-		sendCustomMessageHeader();
-		Serial.println(cmd, HEX);
-
-		if((cmd&0xff00) == header.READ_HEADER)
+		if((cmd&0xff00) == MSG_HEADER::READ_HEADER)
 		{	
-			if((cmd == header.READ_ACCEL_PROFILE_CFG) 
+			if((cmd == MSG_HEADER::READ_ACCEL_PROFILE_CFG) 
 			    && !init_checklist&0x01)
 			{	
 				Serial.read();
@@ -88,7 +88,7 @@ void StepperESP::readInitParam(){
 				setAccelerationProfile(*accel_, *decel_, *brake_, *weak_accel);
 				init_checklist = init_checklist|0x01;
 			}
-			else if((cmd == header.READ_DYNAMIC_ACCEL_CFG)
+			else if((cmd == MSG_HEADER::READ_DYNAMIC_ACCEL_CFG)
 			          && !(init_checklist&0x02))
 			{	
 				Serial.read();
@@ -96,12 +96,12 @@ void StepperESP::readInitParam(){
 				for(int i = 7; i >= 0; i--){
 					data[i] = Serial.read();
 				}
-				max_acceleration = *(int32_t*)(&data[4]);
-				decel_divisor = *(int16_t*)(&data[2]);
-				accel_divisor = *(int16_t*)(&data[0]);
+				boundary_speed = *(int32_t*)(&data[4]);
+				boundary_speed2 = *(int32_t*)(&data[0]);
+
 				init_checklist = init_checklist|0x02;
 			}
-			else if((cmd == header.READ_UPDATE_PERIOD_CFG) 
+			else if((cmd == MSG_HEADER::READ_UPDATE_PERIOD_CFG) 
 			        && !(init_checklist&0x04))
 			{	
 				Serial.read();
@@ -118,8 +118,8 @@ void StepperESP::readInitParam(){
 	{	
 		sendError();
 		char msg[] = "Failed Initialization";
-		Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
-		Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
+		Serial.write((MSG_HEADER::SEND_HUMAN_MESSAGE >> 8) & 0xff);
+		Serial.write(MSG_HEADER::SEND_HUMAN_MESSAGE & 0xff);
 		Serial.print("Init flag: ");
 		Serial.print(init_checklist, HEX);
 		Serial.println();
@@ -134,9 +134,8 @@ void StepperESP::readInitParam(){
 		Serial.print(acceleration_val[1]); Serial.print(" ");
 		Serial.print(acceleration_val[2]); Serial.print(" ");
 		Serial.print(acceleration_val[3]); Serial.print(" ");
-		Serial.print(max_acceleration); Serial.print(" ");
-		Serial.print(accel_divisor); Serial.print(" ");
-		Serial.print(decel_divisor); Serial.print(" ");
+		Serial.print(boundary_speed); Serial.print(" ");
+		Serial.print(boundary_speed2); Serial.print(" ");
 		Serial.println(dt);
 		disableTx = false;
 		re_init = false;
@@ -211,6 +210,188 @@ void StepperESP::initializeStepperEncoder()
 	encoder[1].setUnitPCNT(7);
 	encoder[1].attachHalfQuad(encoderB[0], encoderB[1]);
 }
+void StepperESP::readShutdownRequest()
+    {   
+        disableTx = true;
+        re_init = true;
+        delay(50);
+        // Serial.flush();
+        char buffer[100] = {};
+        while(Serial.available())
+        {   
+            if(Serial.available() < 100)
+            {
+                Serial.readBytes(buffer, Serial.available());
+            }
+            else
+            {
+                Serial.readBytes(buffer, 100);
+            }
+        }
+    }
+
+
+//   VELOCITY CONTROL
+//===================================
+
+uint8_t StepperESP::GetAccelerationMode(int stepper_no)
+{
+	if (abs(set_tick_speed[stepper_no]) <= 100)
+	{	
+		if (abs(tick_speed_est[stepper_no]) > boundary_speed2)
+		{
+			return SPEED_SCENARIO::DECEL;
+		}
+		return SPEED_SCENARIO::BRAKE;
+	}
+	
+	uint8_t ramp_state = stepper[stepper_no]->rampState() & RAMP_STATE_MASK;
+
+	if (ramp_state & RAMP_STATE_REVERSE)
+	{
+		if (abs(tick_speed_est[stepper_no]) > boundary_speed2)
+		{
+			return SPEED_SCENARIO::DECEL;
+		}
+		return SPEED_SCENARIO::STRONG_DECEL;
+	}
+	else
+	{
+		done_deceleration_flag[stepper_no] = false;
+		if (abs(tick_speed_est[stepper_no]) < boundary_speed)
+		{
+			return SPEED_SCENARIO::WEAK_ACCEL;
+		}
+		return SPEED_SCENARIO::ACCEL;
+	}
+}
+void StepperESP::SetDynamicAcceleration()
+{	
+	static uint8_t prev_accel_mode0;
+	static uint8_t prev_accel_mode1;
+	static boolean new_accel_flag;
+
+	uint8_t accel_mode0 = GetAccelerationMode(0);
+	uint8_t accel_mode1 = GetAccelerationMode(1);
+
+	tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
+    tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
+
+	if(accel_mode0 != prev_accel_mode0 || accel_mode1 != prev_accel_mode1)
+	{
+		new_accel_flag = true;
+	}
+	if(true)
+	{
+		new_speed_flag = false;
+		new_accel_flag = false;
+		prev_accel_mode0 = accel_mode0;
+		prev_accel_mode1 = accel_mode1;
+
+		int8_t accel_flag;
+		if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
+		{
+			accel_flag = accel_mode0;
+		}
+		else
+		{
+			accel_flag = min(accel_mode0, accel_mode1);
+		}
+		uint32_t max_accel = acceleration_val[accel_flag];
+		int32_t tick_accel_temp0 = abs(set_tick_speed[0] - tick_speed_est[0])*1000;
+		int32_t tick_accel_temp1 = abs(set_tick_speed[1] - tick_speed_est[1])*1000;
+		
+		float divisor = 1.0;
+		if(tick_accel_temp0 >= tick_accel_temp1)
+		{	
+			if(tick_accel_temp0 == 0)
+			{
+				divisor = 1.0;
+			}
+			else
+			{
+				divisor = (float)max_accel/tick_accel_temp0;
+			}
+		}
+		else
+		{
+			divisor = (float)max_accel/tick_accel_temp1;
+		}
+		
+		
+		tick_accel[0] = tick_accel_temp0*divisor;
+		tick_accel[1] = tick_accel_temp1*divisor;
+		
+		setAcceleration(tick_accel[0],tick_accel[1]);
+
+	}
+	
+}
+void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
+{
+	stepper[0]->setAcceleration(accel0);
+	stepper[1]->setAcceleration(accel1);
+}
+void StepperESP::setDirection(boolean dir0, boolean dir1)
+{
+	if (dir0 == true){
+		stepper[0]->runForward();
+	}
+	else{
+		stepper[0]->runBackward();
+	}
+	stepper[0]->applySpeedAcceleration();
+
+
+	if (dir1 == true){
+		stepper[1]->runForward();
+	}
+	else
+	{
+		stepper[1]->runBackward();
+	}
+	stepper[1]->applySpeedAcceleration();
+}
+void StepperESP::setSpeed(int32_t speed0, int32_t speed1)
+{
+	if(!re_init)
+	{
+		// if(abs(set_tick_speed[0] - speed0) > 20)
+		// {
+		// 	set_tick_speed[0] = speed0;
+		// 	new_speed_flag = true;
+		// }
+		// if(abs(set_tick_speed[1] - speed1) > 20)
+		// {
+		// 	set_tick_speed[1] = speed1;
+		// 	new_speed_flag = true;
+		// }
+
+		uint32_t ab_speed0 = abs(speed0);
+		uint32_t ab_speed1 = abs(speed1);
+		// Avoid step commands that are too small
+		dir[0] = speed0 > 0;
+		dir[1] = speed1 > 0;
+		setDirection(dir[0] > 0, dir[1] > 0);
+
+		if (ab_speed0 < 20)
+		{
+			stepper[0]->stopMove();
+		}
+		else
+		{
+			stepper[0]->setSpeedInHz(ab_speed0);
+		}
+		if (ab_speed1 < 20)
+		{
+			stepper[1]->stopMove();
+		}
+		else
+		{
+			stepper[1]->setSpeedInHz(ab_speed1);
+		}
+	}
+}
 void StepperESP::getEncoderSpeed()
 {
 	tick_speed[0] = (int16_t)((float)encoder[0].getCount() / (dt * 0.001));
@@ -218,6 +399,135 @@ void StepperESP::getEncoderSpeed()
 	encoder[0].clearCount();
 	encoder[1].clearCount();
 }
+
+//   MESSAGE CONTROL
+//===================================
+
+void StepperESP::sendEncoderSpeed()
+{
+	if(!disableTx)
+	{
+		Serial.write(MSG_HEADER::SEND_ENCODER >> 8);
+		Serial.write(MSG_HEADER::SEND_ENCODER & 0xff);
+		Serial.write(encoder_msg_cnt);
+		Serial.write(tick_speed[0] >> 8);
+		Serial.write(tick_speed[0] & 0xff);
+		Serial.write(tick_speed[1] >> 8);
+		Serial.write(tick_speed[1] & 0xff);
+		encoder_msg_cnt += 1;
+	}
+}
+void StepperESP::sendSpeedProfile()
+{   
+	if(!disableTx)
+	{
+		Serial.write((MSG_HEADER::SEND_FULL_SPEED_PROFILE>>8) & 0xff);
+		Serial.write(MSG_HEADER::SEND_FULL_SPEED_PROFILE & 0xff);
+
+		Serial.write((tick_accel[0] >> 24) & 0xff);
+		Serial.write((tick_accel[0] >> 16) & 0xff);
+		Serial.write((tick_accel[0] >> 8) & 0xff);
+		Serial.write(tick_accel[0] & 0xff);
+
+		Serial.write((tick_accel[1] >> 24) & 0xff);
+		Serial.write((tick_accel[1] >> 16) & 0xff);
+		Serial.write((tick_accel[1] >> 8) & 0xff);
+		Serial.write(tick_accel[1] & 0xff);
+
+		Serial.write((tick_speed_est[0] >> 24) & 0xff);
+		Serial.write((tick_speed_est[0] >> 16) & 0xff);
+		Serial.write((tick_speed_est[0] >> 8) & 0xff);
+		Serial.write(tick_speed_est[0] & 0xff);
+
+		Serial.write((tick_speed_est[1] >> 24) & 0xff);
+		Serial.write((tick_speed_est[1] >> 16) & 0xff);
+		Serial.write((tick_speed_est[1] >> 8) & 0xff);
+		Serial.write(tick_speed_est[1] & 0xff);
+
+		// set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
+		// set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
+
+		Serial.write((tick_speed[0] >> 24) & 0xff);
+		Serial.write((tick_speed[0] >> 16) & 0xff);
+		Serial.write((tick_speed[0] >> 8) & 0xff);
+		Serial.write(tick_speed[0] & 0xff);
+
+		Serial.write((tick_speed[1] >> 24) & 0xff);
+		Serial.write((tick_speed[1] >> 16) & 0xff);
+		Serial.write((tick_speed[1] >> 8) & 0xff);
+		Serial.write(tick_speed[1] & 0xff);
+	}
+}
+void StepperESP::sendSpeedProfile(int32_t est_tick_vel0, int32_t est_tick_vel1, int32_t set_tick_accel0, int32_t set_tick_accel1)
+{
+	if(!disableTx)
+	{
+		Serial.write((MSG_HEADER::SEND_FULL_SPEED_PROFILE>>8) & 0xff);
+		Serial.write(MSG_HEADER::SEND_FULL_SPEED_PROFILE & 0xff);
+
+		Serial.write((set_tick_accel0 >> 24) & 0xff);
+		Serial.write((set_tick_accel0 >> 16) & 0xff);
+		Serial.write((set_tick_accel0 >> 8) & 0xff);
+		Serial.write(set_tick_accel0 & 0xff);
+
+		Serial.write((set_tick_accel1 >> 24) & 0xff);
+		Serial.write((set_tick_accel1 >> 16) & 0xff);
+		Serial.write((set_tick_accel1 >> 8) & 0xff);
+		Serial.write(set_tick_accel1 & 0xff);
+
+		Serial.write((est_tick_vel0 >> 24) & 0xff);
+		Serial.write((est_tick_vel0 >> 16) & 0xff);
+		Serial.write((est_tick_vel0 >> 8) & 0xff);
+		Serial.write(est_tick_vel0 & 0xff);
+
+		Serial.write((est_tick_vel1 >> 24) & 0xff);
+		Serial.write((est_tick_vel1 >> 16) & 0xff);
+		Serial.write((est_tick_vel1 >> 8) & 0xff);
+		Serial.write(est_tick_vel1 & 0xff);
+
+		// set_tick_speed[0] = stepper[0]->getSpeedInMilliHz()/1000;
+		// set_tick_speed[1] = stepper[1]->getSpeedInMilliHz()/1000;
+
+		Serial.write((tick_speed[0] >> 24) & 0xff);
+		Serial.write((tick_speed[0] >> 16) & 0xff);
+		Serial.write((tick_speed[0] >> 8) & 0xff);
+		Serial.write(tick_speed[0] & 0xff);
+
+		Serial.write((tick_speed[1] >> 24) & 0xff);
+		Serial.write((tick_speed[1] >> 16) & 0xff);
+		Serial.write((tick_speed[1] >> 8) & 0xff);
+		Serial.write(tick_speed[1] & 0xff);
+	}
+}
+void StepperESP::sendCustomMessage(const char *msg)
+{	
+	if(!disableTx)
+	{	
+		Serial.write((MSG_HEADER::SEND_HUMAN_MESSAGE >> 8) & 0xff);
+		Serial.write(MSG_HEADER::SEND_HUMAN_MESSAGE & 0xff);
+		Serial.println(msg);
+	}
+}
+void StepperESP::sendCustomMessageHeader()
+{
+	Serial.write((MSG_HEADER::SEND_HUMAN_MESSAGE >> 8) & 0xff);
+	Serial.write(MSG_HEADER::SEND_HUMAN_MESSAGE & 0xff);
+}
+void StepperESP::sendError()
+{   
+	if(!disableTx)
+	{
+		Serial.write((MSG_HEADER::SEND_ERROR>>8) & 0xff);
+		Serial.write(MSG_HEADER::SEND_ERROR & 0xff);
+		Serial.write(0x00);
+		Serial.write(0x00);
+	}
+	
+}
+
+//   DEPRECATED SECTION
+//===================================
+
 void StepperESP::setSpeedAccel(int16_t speed0, int16_t speed1)
 {
 	if(!re_init)
@@ -277,47 +587,6 @@ void StepperESP::setSpeedAccel(int16_t speed0, int16_t speed1)
 
 	}
 }
-void StepperESP::setSpeed(int32_t speed0, int32_t speed1)
-{
-	if(!re_init)
-	{
-		// if(abs(set_tick_speed[0] - speed0) > 20)
-		// {
-		// 	set_tick_speed[0] = speed0;
-		// 	new_speed_flag = true;
-		// }
-		// if(abs(set_tick_speed[1] - speed1) > 20)
-		// {
-		// 	set_tick_speed[1] = speed1;
-		// 	new_speed_flag = true;
-		// }
-
-		uint32_t ab_speed0 = abs(speed0);
-		uint32_t ab_speed1 = abs(speed1);
-		// Avoid step commands that are too small
-		dir[0] = speed0 > 0;
-		dir[1] = speed1 > 0;
-		setDirection(dir[0] > 0, dir[1] > 0);
-
-		if (ab_speed0 < 20)
-		{
-			stepper[0]->stopMove();
-		}
-		else
-		{
-			stepper[0]->setSpeedInHz(ab_speed0);
-		}
-		if (ab_speed1 < 20)
-		{
-			stepper[1]->stopMove();
-		}
-		else
-		{
-			stepper[1]->setSpeedInHz(ab_speed1);
-		}
-	}
-}
-
 uint8_t StepperESP::SetAccelerationMode(int16_t speed, FastAccelStepper *stepper)
 {
 	if (stepper->getCurrentSpeedInUs() == 0)
@@ -397,341 +666,6 @@ uint8_t StepperESP::SetAccelerationMode(int16_t speed, int stepper_no)
 	{
 		return SPEED_SCENARIO::BRAKE;
 	}
-}
-uint8_t StepperESP::GetAccelerationMode(int stepper_no)
-{
-	// deceleration_duration[stepper_no] = millis() - deceleration_timer[stepper_no];
-	// if (deceleration_flag[stepper_no] &&
-	// 	deceleration_duration[stepper_no] > deceleration_time_limit)
-	// {
-	// 	deceleration_flag[stepper_no] = false;
-	// 	return SPEED_SCENARIO::STRONG_DECEL;
-	// }
-	if (abs(set_tick_speed[stepper_no]) <= 100)
-	{	
-		if (abs(tick_speed_est[stepper_no]) > boundary_speed2)
-		{
-			return SPEED_SCENARIO::DECEL;
-		}
-		return SPEED_SCENARIO::BRAKE;
-	}
-	// tick_speed_est[stepper_no] = stepper[stepper_no]->getCurrentSpeedInMilliHz()/1000;
-	// if (tick_speed_est[stepper_no] == 0)
-	// {
-	// 	return SPEED_SCENARIO::WEAK_ACCEL;
-	// }
-
-	
-	uint8_t ramp_state = stepper[stepper_no]->rampState() & RAMP_STATE_MASK;
-	// sendCustomMessageHeader();
-	// Serial.print("Ramp State Motor "); Serial.print(stepper_no);
-	// Serial.print(": ");
-	// if(ramp_state & RAMP_STATE_COAST)
-	// 	Serial.print("COASTING");
-	// else if(ramp_state & RAMP_STATE_REVERSE)
-	// 	Serial.print("REVERSE");
-	// else if(ramp_state & RAMP_STATE_ACCELERATE)
-	// 	Serial.print("ACCELERATE");
-	// Serial.println();
-
-	if (ramp_state & RAMP_STATE_REVERSE)
-	{
-		// if (!deceleration_flag[stepper_no] &&
-		// 	!done_deceleration_flag[stepper_no])
-		// {
-		// 	deceleration_flag[stepper_no] = true;
-		// 	done_deceleration_flag[stepper_no] = true;
-		// 	deceleration_timer[stepper_no] = millis();
-		// }
-		// if (!deceleration_flag[stepper_no] &&
-		// 	done_deceleration_flag[stepper_no])
-		// {
-		// 	return SPEED_SCENARIO::STRONG_DECEL;
-		// }
-		// return SPEED_SCENARIO::DECEL;
-		if (abs(tick_speed_est[stepper_no]) > boundary_speed2)
-		{
-			return SPEED_SCENARIO::DECEL;
-		}
-		return SPEED_SCENARIO::STRONG_DECEL;
-	}
-	else
-	{
-		done_deceleration_flag[stepper_no] = false;
-		if (abs(tick_speed_est[stepper_no]) < boundary_speed)
-		{
-			return SPEED_SCENARIO::WEAK_ACCEL;
-		}
-		return SPEED_SCENARIO::ACCEL;
-	}
-}
-
-void StepperESP::SetDynamicAcceleration()
-{	
-	static uint8_t prev_accel_mode0;
-	static uint8_t prev_accel_mode1;
-	static boolean new_accel_flag;
-
-	uint8_t accel_mode0 = GetAccelerationMode(0);
-	uint8_t accel_mode1 = GetAccelerationMode(1);
-
-	tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
-    tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
-
-	if(accel_mode0 != prev_accel_mode0 || accel_mode1 != prev_accel_mode1)
-	{
-		new_accel_flag = true;
-	}
-	if(true)
-	{
-		// sendCustomMessageHeader();
-		// Serial.print(new_speed_flag); Serial.print(" ");
-		// Serial.print(new_accel_flag); Serial.print(" ");
-		// Serial.print(accel_mode0); Serial.print(" ");
-		// Serial.println(accel_mode1);
-
-		new_speed_flag = false;
-		new_accel_flag = false;
-		prev_accel_mode0 = accel_mode0;
-		prev_accel_mode1 = accel_mode1;
-
-		int8_t accel_flag;
-		if (accel_mode0 == accel_mode1 && accel_mode0 == SPEED_SCENARIO::BRAKE)
-		{
-			accel_flag = accel_mode0;
-		}
-		else
-		{
-			accel_flag = min(accel_mode0, accel_mode1);
-		}
-		uint32_t max_accel = acceleration_val[accel_flag];
-		int32_t tick_accel_temp0 = abs(set_tick_speed[0] - tick_speed_est[0])*1000/accel_divisor;
-		int32_t tick_accel_temp1 = abs(set_tick_speed[1] - tick_speed_est[1])*1000/accel_divisor;
-		
-		float divisor = 1.0;
-		if(tick_accel_temp0 >= tick_accel_temp1)
-		{	
-			if(tick_accel_temp0 == 0)
-			{
-				divisor = 1.0;
-			}
-			else
-			{
-				divisor = (float)max_accel/tick_accel_temp0;
-			}
-		}
-		else
-		{
-			divisor = (float)max_accel/tick_accel_temp1;
-		}
-		
-		
-		tick_accel[0] = tick_accel_temp0*divisor;
-		tick_accel[1] = tick_accel_temp1*divisor;
-		
-		setAcceleration(tick_accel[0],tick_accel[1]);
-
-	}
-		
-	// }
-	// setDirection(dir[0], dir[1]);
-}
-int8_t StepperESP::GetMotorState(int stepper_no, int32_t &tick_diff, int8_t &direction)
-{
-	tick_diff = abs(set_tick_speed[stepper_no] - tick_speed_est[stepper_no]);
-	bool positive = set_tick_speed[stepper_no] * tick_speed_est[stepper_no] >= 0;
-	if(abs(set_tick_speed[stepper_no]) < 100)
-	{	
-		if(tick_speed_est[stepper_no] > 0)
-		{
-			direction = -1;
-		}
-		else
-		{
-			direction = 1;
-		}
-		return SPEED_SCENARIO::BRAKE;
-	}
-	
-	if(tick_speed_est[stepper_no] == 0)
-	{
-		if(set_tick_speed[stepper_no] > 0)
-			direction = 1;
-		else
-			direction = -1;
-		return SPEED_SCENARIO::WEAK_ACCEL;
-	}
-	if(!positive)
-	{
-		if(tick_speed_est[stepper_no] > 0)
-			direction = -1;
-		else
-			direction = 1;
-		return SPEED_SCENARIO::STRONG_DECEL;
-	}
-
-	if (tick_speed_est[stepper_no] < set_tick_speed[stepper_no])
-	{	
-		if(tick_speed_est[stepper_no] > 0)
-		{
-			direction = 1;
-		}
-		else
-		{
-			direction = -1;
-		}
-		if(abs(tick_speed_est[stepper_no]) < boundary_speed)
-		{
-			return SPEED_SCENARIO::WEAK_ACCEL;
-		}
-		return SPEED_SCENARIO::ACCEL;
-	}
-	
-	if(tick_speed_est[stepper_no] > 0)
-	{
-		direction = -1;
-	}
-	else
-	{
-		direction = 1;
-	}
-	return SPEED_SCENARIO::DECEL;
-}
-void StepperESP::UpdateVelocityRamp()
-{	
-	static float update_period = 0.02;
-	static int32_t tick_diff[2];
-	static int8_t direction[2];
-	static int32_t accel[2];
-	static int32_t ramp_step[2];
-
-	tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
-    tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
-       
-	if(abs(tick_speed_est[0] - projected_tick_velocity[0]) < 200 &&
-	   abs(tick_speed_est[1] - projected_tick_velocity[1]) < 200)
-	{
-		// Determine whether the motor needs to decelerate, accelerate, or brake
-		// Update the tick difference between the current and set velocity
-		// and the move direction.
-		
-		
-		uint8_t accel_mode0 = GetMotorState(0, tick_diff[0], direction[0]);
-		uint8_t accel_mode1 = GetMotorState(1, tick_diff[1], direction[1]);
-		sendCustomMessageHeader();
-		Serial.print("Current Acceleration Mode: ");
-		Serial.print(accel_mode0); Serial.print(" ");
-		Serial.println(accel_mode1);
-		uint8_t which_mode = min(accel_mode0, accel_mode1);
-		if(accel_mode0 == SPEED_SCENARIO::BRAKE &&
-		accel_mode1 == SPEED_SCENARIO::BRAKE)
-		{
-			which_mode = SPEED_SCENARIO::BRAKE;
-		}
-		stepper[0]->setAcceleration(acceleration_val[which_mode]);
-		stepper[1]->setAcceleration(acceleration_val[which_mode]);
-
-		accel[0] = acceleration_val[which_mode];
-		accel[1] = acceleration_val[which_mode];
-
-		sendCustomMessageHeader();
-		Serial.print("Apply new tick velocity ");
-		Serial.print(accel[0]); Serial.print(" ");
-		Serial.print(accel[1]); Serial.print(" ");
-
-
-		// Determine the appropriate step so that both motors
-		// can reach the set velocities at the same time.
-		
-		float divisor;
-
-		if(abs(tick_diff[1]) < abs(tick_diff[0]))
-		{
-			divisor = (float)abs(tick_diff[1])/abs(tick_diff[0]);
-			accel[1] *= divisor;
-		}
-		else
-		{
-			divisor = (float)abs(tick_diff[0])/abs(tick_diff[1]);
-			accel[0] *= divisor;
-		}
-
-		if(tick_diff[0] == 0){
-			accel[0] = 0;
-		}
-		if(tick_diff[1] == 0){
-			accel[1] = 0;
-		}
-
-		ramp_step[0] = direction[0] * accel[0] * update_period;
-		ramp_step[1] = direction[1] * accel[1] * update_period;
-
-		if(abs(ramp_step[0]) > abs(tick_diff[0]))
-		{
-			ramp_step[0] = tick_diff[0];
-		}
-		if(abs(ramp_step[1]) > abs(tick_diff[1]))
-		{
-			ramp_step[1] = tick_diff[1];
-		}
-
-		
-		Serial.print(ramp_step[0]); Serial.print(" ");
-		Serial.print(ramp_step[1]); Serial.print(" ");
-		Serial.print(projected_tick_velocity[0]); Serial.print(" ");
-		Serial.print(projected_tick_velocity[1]); Serial.print(" ");
-		Serial.print(tick_speed_est[0]); Serial.print(" ");
-		Serial.print(tick_speed_est[1]); Serial.print(" ");
-		Serial.print(set_tick_speed[0]); Serial.print(" ");
-		Serial.println(set_tick_speed[1]);
-
-		projected_tick_velocity[0] = projected_tick_velocity[0] + ramp_step[0];
-		projected_tick_velocity[1] = projected_tick_velocity[1] + ramp_step[1];
-
-		setSpeed(projected_tick_velocity[0], projected_tick_velocity[1]);
-	}
-	else
-	{	
-		sendCustomMessageHeader();
-		Serial.print("Re-set tick velocity    ");
-		Serial.print(accel[0]); Serial.print(" ");
-		Serial.print(accel[1]); Serial.print(" ");
-		Serial.print(ramp_step[0]); Serial.print(" ");
-		Serial.print(ramp_step[1]); Serial.print(" ");
-		Serial.print(projected_tick_velocity[0]); Serial.print(" ");
-		Serial.print(projected_tick_velocity[1]); Serial.print(" ");
-		Serial.print(tick_speed_est[0]); Serial.print(" ");
-		Serial.print(tick_speed_est[1]); Serial.print(" ");
-		Serial.print(set_tick_speed[0]); Serial.print(" ");
-		Serial.println(set_tick_speed[1]);
-		setSpeed(projected_tick_velocity[0], projected_tick_velocity[1]);
-	}
-	
-}
-void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
-{
-	stepper[0]->setAcceleration(accel0);
-	stepper[1]->setAcceleration(accel1);
-}
-void StepperESP::setDirection(boolean dir0, boolean dir1)
-{
-	if (dir0 == true){
-		stepper[0]->runForward();
-	}
-	else{
-		stepper[0]->runBackward();
-	}
-	stepper[0]->applySpeedAcceleration();
-
-
-	if (dir1 == true){
-		stepper[1]->runForward();
-	}
-	else
-	{
-		stepper[1]->runBackward();
-	}
-	stepper[1]->applySpeedAcceleration();
 }
 void StepperESP::motorControl()
 {
@@ -844,10 +778,175 @@ void StepperESP::recvWithStartEndMarkers()
 		}
 	}
 }
+void StepperESP::UpdateVelocityRamp()
+{	
+	static float update_period = 0.02;
+	static int32_t tick_diff[2];
+	static int8_t direction[2];
+	static int32_t accel[2];
+	static int32_t ramp_step[2];
 
-void StepperESP::sendCustomMessage(const char *msg)
+	tick_speed_est[0] = stepper[0]->getCurrentSpeedInMilliHz()/1000;
+    tick_speed_est[1] = stepper[1]->getCurrentSpeedInMilliHz()/1000;
+       
+	if(abs(tick_speed_est[0] - projected_tick_velocity[0]) < 200 &&
+	   abs(tick_speed_est[1] - projected_tick_velocity[1]) < 200)
+	{
+		// Determine whether the motor needs to decelerate, accelerate, or brake
+		// Update the tick difference between the current and set velocity
+		// and the move direction.
+		
+		
+		uint8_t accel_mode0 = GetMotorState(0, tick_diff[0], direction[0]);
+		uint8_t accel_mode1 = GetMotorState(1, tick_diff[1], direction[1]);
+		sendCustomMessageHeader();
+		Serial.print("Current Acceleration Mode: ");
+		Serial.print(accel_mode0); Serial.print(" ");
+		Serial.println(accel_mode1);
+		uint8_t which_mode = min(accel_mode0, accel_mode1);
+		if(accel_mode0 == SPEED_SCENARIO::BRAKE &&
+		accel_mode1 == SPEED_SCENARIO::BRAKE)
+		{
+			which_mode = SPEED_SCENARIO::BRAKE;
+		}
+		stepper[0]->setAcceleration(acceleration_val[which_mode]);
+		stepper[1]->setAcceleration(acceleration_val[which_mode]);
+
+		accel[0] = acceleration_val[which_mode];
+		accel[1] = acceleration_val[which_mode];
+
+		sendCustomMessageHeader();
+		Serial.print("Apply new tick velocity ");
+		Serial.print(accel[0]); Serial.print(" ");
+		Serial.print(accel[1]); Serial.print(" ");
+
+
+		// Determine the appropriate step so that both motors
+		// can reach the set velocities at the same time.
+		
+		float divisor;
+
+		if(abs(tick_diff[1]) < abs(tick_diff[0]))
+		{
+			divisor = (float)abs(tick_diff[1])/abs(tick_diff[0]);
+			accel[1] *= divisor;
+		}
+		else
+		{
+			divisor = (float)abs(tick_diff[0])/abs(tick_diff[1]);
+			accel[0] *= divisor;
+		}
+
+		if(tick_diff[0] == 0){
+			accel[0] = 0;
+		}
+		if(tick_diff[1] == 0){
+			accel[1] = 0;
+		}
+
+		ramp_step[0] = direction[0] * accel[0] * update_period;
+		ramp_step[1] = direction[1] * accel[1] * update_period;
+
+		if(abs(ramp_step[0]) > abs(tick_diff[0]))
+		{
+			ramp_step[0] = tick_diff[0];
+		}
+		if(abs(ramp_step[1]) > abs(tick_diff[1]))
+		{
+			ramp_step[1] = tick_diff[1];
+		}
+
+		
+		Serial.print(ramp_step[0]); Serial.print(" ");
+		Serial.print(ramp_step[1]); Serial.print(" ");
+		Serial.print(projected_tick_velocity[0]); Serial.print(" ");
+		Serial.print(projected_tick_velocity[1]); Serial.print(" ");
+		Serial.print(tick_speed_est[0]); Serial.print(" ");
+		Serial.print(tick_speed_est[1]); Serial.print(" ");
+		Serial.print(set_tick_speed[0]); Serial.print(" ");
+		Serial.println(set_tick_speed[1]);
+
+		projected_tick_velocity[0] = projected_tick_velocity[0] + ramp_step[0];
+		projected_tick_velocity[1] = projected_tick_velocity[1] + ramp_step[1];
+
+		setSpeed(projected_tick_velocity[0], projected_tick_velocity[1]);
+	}
+	else
+	{	
+		sendCustomMessageHeader();
+		Serial.print("Re-set tick velocity    ");
+		Serial.print(accel[0]); Serial.print(" ");
+		Serial.print(accel[1]); Serial.print(" ");
+		Serial.print(ramp_step[0]); Serial.print(" ");
+		Serial.print(ramp_step[1]); Serial.print(" ");
+		Serial.print(projected_tick_velocity[0]); Serial.print(" ");
+		Serial.print(projected_tick_velocity[1]); Serial.print(" ");
+		Serial.print(tick_speed_est[0]); Serial.print(" ");
+		Serial.print(tick_speed_est[1]); Serial.print(" ");
+		Serial.print(set_tick_speed[0]); Serial.print(" ");
+		Serial.println(set_tick_speed[1]);
+		setSpeed(projected_tick_velocity[0], projected_tick_velocity[1]);
+	}
+	
+}
+int8_t StepperESP::GetMotorState(int stepper_no, int32_t &tick_diff, int8_t &direction)
 {
-	Serial.write((header.SEND_HUMAN_MESSAGE >> 8) & 0xff);
-	Serial.write(header.SEND_HUMAN_MESSAGE & 0xff);
-	Serial.println(msg);
+	tick_diff = abs(set_tick_speed[stepper_no] - tick_speed_est[stepper_no]);
+	bool positive = set_tick_speed[stepper_no] * tick_speed_est[stepper_no] >= 0;
+	if(abs(set_tick_speed[stepper_no]) < 100)
+	{	
+		if(tick_speed_est[stepper_no] > 0)
+		{
+			direction = -1;
+		}
+		else
+		{
+			direction = 1;
+		}
+		return SPEED_SCENARIO::BRAKE;
+	}
+	
+	if(tick_speed_est[stepper_no] == 0)
+	{
+		if(set_tick_speed[stepper_no] > 0)
+			direction = 1;
+		else
+			direction = -1;
+		return SPEED_SCENARIO::WEAK_ACCEL;
+	}
+	if(!positive)
+	{
+		if(tick_speed_est[stepper_no] > 0)
+			direction = -1;
+		else
+			direction = 1;
+		return SPEED_SCENARIO::STRONG_DECEL;
+	}
+
+	if (tick_speed_est[stepper_no] < set_tick_speed[stepper_no])
+	{	
+		if(tick_speed_est[stepper_no] > 0)
+		{
+			direction = 1;
+		}
+		else
+		{
+			direction = -1;
+		}
+		if(abs(tick_speed_est[stepper_no]) < boundary_speed)
+		{
+			return SPEED_SCENARIO::WEAK_ACCEL;
+		}
+		return SPEED_SCENARIO::ACCEL;
+	}
+	
+	if(tick_speed_est[stepper_no] > 0)
+	{
+		direction = -1;
+	}
+	else
+	{
+		direction = 1;
+	}
+	return SPEED_SCENARIO::DECEL;
 }

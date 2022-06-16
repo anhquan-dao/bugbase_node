@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import rospy
+import rosparam
 import tf as ros_tf
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -13,7 +14,9 @@ import serial
 import time
 
 from bugbase_node.bugbase_driver import ESP32BugBase
-from bugbase_node.speed_graph import SpeedVisualizer
+# from bugbase_node.speed_graph import SpeedVisualizer
+
+from bugbase_node.msg import BugbaseMotor, BugbaseMotorArray
 
 WRITETEST = False
 READTEST = False
@@ -47,7 +50,8 @@ class BugBaseEncoder:
         self.current_theta = 0
         self.last_enc_time = rospy.Time.now().to_sec()
 
-        self.motor_encoder_ratio = params["wheel_enc_ratio"]
+        self.motor_encoder_ratio = params["motor_enc_ratio"]
+        self.wheel_encoder_ratio = params["wheel_enc_ratio"]
         self.left_enc_inverted = params["left_enc_inverted"]
         self.right_enc_inverted = params["right_enc_inverted"]
 
@@ -64,8 +68,8 @@ class BugBaseEncoder:
         if self.left_enc_inverted:
             vl_enc = -vl_enc
 
-        vr_enc *= self.motor_encoder_ratio
-        vl_enc *= self.motor_encoder_ratio
+        vr_enc *= self.wheel_encoder_ratio
+        vl_enc *= self.wheel_encoder_ratio
 
         # rospy.loginfo("Encoder tick speed: " + str(vr_enc) + "  " + str(vl_enc))
 
@@ -124,23 +128,21 @@ class Node:
         self.cmd_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_callback, queue_size=1)
 
         self.odom_publisher = rospy.Publisher(
-            odom_topic, Odometry, queue_size=1)
+            params["odom_topic"], Odometry, queue_size=1)
 
         self.encoderOdom = BugBaseEncoder(params)
 
         self.vr_ticks, self.vl_ticks = 0, 0
         self.accel_mode = 0
-
-        if(params["visualizer"]):
-            self.visualizer = SpeedVisualizer()
-        else:
-            self.visualizer = None
-
         
         self.updater = diagnostic_updater.Updater()
         self.updater.setHardwareID("none")
 
         self.updater.add("Function updater", self.dummy_diagnostic)
+
+        self.debug_publisher = rospy.Publisher("motor_state", BugbaseMotorArray, queue_size=1)
+        self.debug_msg = BugbaseMotorArray()
+        self.debug_msg.motor = [BugbaseMotor(), BugbaseMotor()]
 
         self.diag_accel = [0, 0]
         self.diag_speed = [0, 0]
@@ -160,7 +162,8 @@ class Node:
                     if(read_what == 1):
                         data = self.bugbase.readSpeedProfile()
                         speed1, speed2 = data[-2:]
-                        print(data)
+                        self.diag_accel[0], self.diag_accel[1], self.diag_speed[0], self.diag_speed[1] = data[:4]
+                        # print(data)
 
                     # rospy.loginfo("Encoder Speed: " + str(speed2) + "  " + str(speed1))
 
@@ -188,7 +191,19 @@ class Node:
                     # print("timeout")
                     pass
 
-            self.updater.update()
+            self.updater.force_update()
+
+            self.debug_msg.motor[0].acceleration = self.diag_accel[0]
+            self.debug_msg.motor[0].velocity = speed1
+            self.debug_msg.motor[0].est_velocity = self.diag_speed[0]
+            self.debug_msg.motor[0].set_velocity = self.vr_ticks
+
+            self.debug_msg.motor[1].acceleration = self.diag_accel[1]
+            self.debug_msg.motor[1].velocity = speed2
+            self.debug_msg.motor[1].est_velocity = self.diag_speed[1]
+            self.debug_msg.motor[1].set_velocity = self.vl_ticks
+
+            self.debug_publisher.publish(self.debug_msg)
 
             # rate.sleep()
 
@@ -198,7 +213,7 @@ class Node:
             if not READTEST:
                 self.vr_ticks, self.vl_ticks = self.bugbase.inv_kinematics(
                     data.linear.x, data.angular.z)
-                rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
+                # rospy.loginfo("Set Stepper Speed: " + str(self.vr_ticks) + "  " + str(self.vl_ticks))
                 if not SELFTEST:
                     self.bugbase.setSpeed(self.vr_ticks, self.vl_ticks)
 
@@ -244,57 +259,81 @@ if __name__ == "__main__":
     rospy.loginfo("Connecting to ESP board on port {} at baudrate {}".format(
         port_name, baud_rate))
 
-    base_width = rospy.get_param("~base_width", 0.4948) # Unit: m
-    ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7) # Unit: ticks/m
-    left_inverted = rospy.get_param("~left_inverted", True)
-    right_inverted = rospy.get_param("~right_inverted", True)
-    turn_direction = rospy.get_param("~turn_direction", True)\
+    # base_width = rospy.get_param("~base_width", 0.4948) # Unit: m
+    # ticks_per_meter = rospy.get_param("~ticks_per_meter", 4904.7) # Unit: ticks/m
+    # left_inverted = rospy.get_param("~left_inverted", True)
+    # right_inverted = rospy.get_param("~right_inverted", True)
+    # turn_direction = rospy.get_param("~turn_direction", True)\
     
-    acceleration = rospy.get_param("~acceleration", 2.0) # Unit: m/s^2
-    weak_acceleration = rospy.get_param("~weak_acceleration", 1.0) # Unit: m/s^2
-    deceleration = rospy.get_param("~deceleration", 3.0) # Unit: m/s^2
-    brake_accel = rospy.get_param("~brake_accel", 7.0) # Unit: m/s^2
-    accel_profile = [weak_acceleration, acceleration, deceleration, brake_accel]
+    # acceleration = rospy.get_param("~acceleration", 2.0) # Unit: m/s^2
+    # weak_acceleration = rospy.get_param("~weak_acceleration", 1.0) # Unit: m/s^2
+    # deceleration = rospy.get_param("~deceleration", 3.0) # Unit: m/s^2
+    # brake_accel = rospy.get_param("~brake_accel", 7.0) # Unit: m/s^2
+    # accel_profile = [weak_acceleration, acceleration, deceleration, brake_accel]
 
-    max_acceleration = rospy.get_param("~max_acceleration", 10.0) # Unit: m/s^2
-    decel_time_limit = rospy.get_param("~deceleration_time_limit", 200) # Unit: ms
-    accel_time_limit = rospy.get_param("~acceleration_time_limit", 500) # Unit: ms
+    # max_acceleration = rospy.get_param("~max_acceleration", 10.0) # Unit: m/s^2
+    # decel_time_limit = rospy.get_param("~deceleration_time_limit", 200) # Unit: ms
+    # accel_time_limit = rospy.get_param("~acceleration_time_limit", 500) # Unit: ms
 
-    update_rate = rospy.get_param("~update_rate", 50) # Unit: Hz
-    update_period = 1000.0/update_rate
+    # accel_boundary_speed = rospy.get_param("~accel_boundary_speed", 0.2)
+    # decel_boundary_speed = rospy.get_param("~decel_boundary_speed", 0.2)
+
+    # update_rate = rospy.get_param("~update_rate", 50) # Unit: Hz
+    # update_period = 1000.0/update_rate
     
-    no_encoder_operation = rospy.get_param("~no_encoder_operation", False)
-    left_enc_inverted = rospy.get_param("~left_enc_inverted", False)
-    right_enc_inverted = rospy.get_param("~right_enc_inverted", True)
-    wheel_enc_ratio = rospy.get_param("~wheel_enc_ratio", 1.3333)
+    # no_encoder_operation = rospy.get_param("~no_encoder_operation", False)
+    # left_enc_inverted = rospy.get_param("~left_enc_inverted", False)
+    # right_enc_inverted = rospy.get_param("~right_enc_inverted", True)
+    # wheel_enc_ratio = rospy.get_param("~wheel_enc_ratio", 1.3333)
+    # motor_enc_ratio = rospy.get_param("~motor_enc_ratio", 9.62)
 
-    odom_topic = rospy.get_param("~odom_topic", "/odometry/wheel")
+    # odom_topic = rospy.get_param("~odom_topic", "/odometry/wheel")
 
-    visualizer = rospy.get_param("~visualizer", False)
+    # visualizer = rospy.get_param("~visualizer", False)
 
+    # playground_enable = rospy.get_param("~playground_enable", False)
+    # angular_acceleration = rospy.get_param("~angular_acceleration", 0.5)
     
-    params = {
-            'port' : port_name,
-            'baud' : baud_rate,
-            'timeout' : timeout,
-            'base_width' : base_width,
-            'ticks_per_meter' : ticks_per_meter,
-            'left_inverted' : left_inverted,
-            'right_inverted' : right_inverted,
-            'turn_direction' : turn_direction,
-            'accel_profile' : accel_profile,
-            'max_acceleration' : max_acceleration,
-            'decel_time_limit' : decel_time_limit,
-            'accel_time_limit' : accel_time_limit,
-            'update_period' : update_period,
-            'update_rate' : update_rate,
-            'no_encoder_operation' : no_encoder_operation,
-            'left_enc_inverted' : left_enc_inverted,
-            'right_enc_inverted' : right_enc_inverted,
-            'wheel_enc_ratio' : wheel_enc_ratio,
-            'odom_topic' : odom_topic,
-            'visualizer' : visualizer
-        }
+    # params = {
+    #         'port' : port_name,
+    #         'baud' : baud_rate,
+    #         'timeout' : timeout,
+    #         'base_width' : base_width,
+    #         'ticks_per_meter' : ticks_per_meter,
+    #         'left_inverted' : left_inverted,
+    #         'right_inverted' : right_inverted,
+    #         'turn_direction' : turn_direction,
+    #         'accel_profile' : accel_profile,
+    #         'accel_boundary_speed' : accel_boundary_speed,
+    #         'decel_boundary_speed' : decel_boundary_speed,
+    #         'max_acceleration' : max_acceleration,
+    #         'decel_time_limit' : decel_time_limit,
+    #         'accel_time_limit' : accel_time_limit,
+    #         'update_period' : update_period,
+    #         'update_rate' : update_rate,
+    #         'no_encoder_operation' : no_encoder_operation,
+    #         'left_enc_inverted' : left_enc_inverted,
+    #         'right_enc_inverted' : right_enc_inverted,
+    #         'wheel_enc_ratio' : wheel_enc_ratio,
+    #         'motor_enc_ratio' : motor_enc_ratio,
+    #         'odom_topic' : odom_topic,
+    #         'visualizer' : visualizer,
+    #         'playground_enable': playground_enable,
+    #         "angular_acceleration": angular_acceleration
+    #     }
+
+    param_list = rosparam.list_params(rospy.get_name())
+    params = {}
+    for i in range(len(param_list)):
+        param_list[i] = param_list[i].replace(rospy.get_name()+"/", "", 1)
+        params[param_list[i]] = rospy.get_param("~"+param_list[i])
+
+    params["update_period"] = 1000.0/params["update_rate"]
+    params["accel_profile"] = [params["weak_acceleration"], \
+                               params["acceleration"], \
+                               params["deceleration"], \
+                               params["brake_accel"]]
+
     try:
         node = Node(params)
         node.run()

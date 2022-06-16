@@ -1,58 +1,77 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 import datetime as dt
 import time
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+import plotext as plt
+import rospy
+from bugbase_node.msg import BugbaseMotorArray, BugbaseMotor
 
 
 class SpeedVisualizer:
     def __init__(self):   
+        
+        sub = rospy.Subscriber("motor_state", BugbaseMotorArray, self.callback, queue_size=1)
+
+        self.xs, self.ys = [], []
         # Create figure for plotting
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(1, 1, 1)
-        self.xs = []
-        self.ys = []
+        plt.date_form("Y/m/d H:M:S")
+        # plt.clc()
+        plt.title("test streaming")
+        plt.xlim(lower=0, upper=100)
+        plt.xlabel("X")
+        plt.ylabel("Y")
+            
+    def callback(self, data):
+        
+        self.xs.append(float(data.motor[0].est_velocity))
+        self.ys.append(float(data.motor[0].acceleration))
 
-        self.updated = True
-        self.data = 0
+        # Limit x and y lists to 20 items
+        if(len(self.xs) > 100):
+            self.xs = self.xs[-100:]
+            self.ys = self.ys[-100:]
+        # Draw x and y lists
+        plt.clt()
+        plt.cld()
 
-        # Set up plot to call animate() function periodically
-        self.ani = animation.FuncAnimation(self.fig, self.animate, interval=1000)
+        plt.ylim(min(min(self.xs), min(self.ys)) - 10, max(max(self.xs), max(self.ys)) + 10)
+        plt.plot(self.ys, label="first")
+        plt.plot(self.xs, label="second")
+        # rospy.loginfo(str(len(self.xs)) + " " + str(len(self.ys)))
+        plt.sleep(0.001)
         plt.show()
-
-        # This function is called periodically from FuncAnimation
-    def animate(self, i):
-
-        if self.updated:
-            # Add x and y to lists
-            self.xs.append(dt.datetime.now().strftime('%H:%M:%S.%f'))
-            self.ys.append(self.data)
-            # self.updated = False
-
-            # Limit x and y lists to 20 items
-            self.xs = self.xs[-20:]
-            self.ys = self.ys[-20:]
-
-            # Draw x and y lists
-            self.ax.clear()
-            self.ax.plot(self.xs, self.ys)
-
-            # Format plot
-            plt.xticks(rotation=45, ha='right')
-            plt.subplots_adjust(bottom=0.30)
-            plt.title('TMP102 Temperature over Time')
-            plt.ylabel('Temperature (deg C)')
 
     def update_data(self, data):
         self.data = data
+        # self.xs.append(plt.datetime_to_string(plt.today_datetime(), "Y/m/d H:M:S"))
+        self.xs.append(float(-data))
+        self.ys.append(float(data))
+
+        # Limit x and y lists to 20 items
+        if(len(self.xs) > 100):
+            self.xs = self.xs[-100:]
+            self.ys = self.ys[-100:]
+
+        # Draw x and y lists
+        plt.clt()
+        plt.cld()
+
+        plt.ylim(self.xs[-1]-10, self.ys[-1]+10)
+        plt.plot(self.ys, label="first")
+        plt.plot(self.xs, label="second")
+        plt.show()
 
 if __name__ == "__main__":
     
+    rospy.init_node("test_phone_stream")
+
     visualizer = SpeedVisualizer()
 
-    visualizer.data = 100
+    rate = rospy.Rate(10)
+
+    while not rospy.is_shutdown():
+        rate.sleep()
     # plt.show()
 
         
