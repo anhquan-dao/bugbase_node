@@ -4,6 +4,7 @@
 import serial
 import time
 import struct
+import numpy as np
 
 import bugbase_node.esp32_message_header as ESP32Header
 
@@ -64,7 +65,8 @@ class ESP32BugBase:
         self.vel_timer = time.time()
         self.ANGULAR_ACCELERATION = params["angular_acceleration"]
         
-        self.angular_z = 0
+        self.angular_z, self.linear_x = 0, 0
+        self.avg_dt = 0
         self.prev_linear_x, self.prev_angular_z = 0, 0
         self.prev_vr_ticks = 0
         self.prev_vl_ticks = 0
@@ -456,6 +458,35 @@ class ESP32BugBase:
                 else:
                     angular_z = self.prev_angular_z - self.ANGULAR_ACCELERATION * dt
 
+    def test_send_angular_acceleration(self, linear_vel, angular_vel):
+
+        if self.PLAYGROUND_ENABLE:
+
+            # Calculate how much the car will travel with the set velocity
+            dist_x, dist_y, theta = 0, 0, 0
+            if(self.angular_z == 0):
+                dist_x = linear_vel * self.avg_dt
+
+            else:
+                r = linear_vel/angular_vel
+                
+                dist_x = r*np.sin(angular_vel * self.avg_dt)
+                dist_y = r*(1 - np.cos(angular_vel * self.avg_dt))
+
+                theta = angular_vel * self.avg_dt
+
+            # Check if the set angular velocity exceeded the limit angular acceleration
+            d_angular = angular_vel - self.prev_angular_z
+            angular_z_hat = 0
+            if(abs(d_angular)/self.avg_dt > self.ANGULAR_ACCELERATION):
+                if(d_angular > 0):
+                    angular_z_hat = self.prev_angular_z + self.ANGULAR_ACCELERATION * dt
+                else:
+                    angular_z_hat = self.prev_angular_z - self.ANGULAR_ACCELERATION * dt
+
+            angular_z_hat = 0
+        
+            
 
     def __del__(self):
         self.ser.close()

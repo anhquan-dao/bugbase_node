@@ -86,14 +86,13 @@ class BugBaseEncoder:
         else:
             r = linear_vel/angular_vel
 
-            self.current_theta += angular_vel * dt
-            self.current_theta = self.normalize_angle(self.current_theta)
-
             self.current_x += r*(-np.sin(self.current_theta) +
                                  np.sin(self.current_theta + angular_vel*dt))
             self.current_y += r*(np.cos(self.current_theta) -
                                  np.cos(self.current_theta + angular_vel*dt))
-
+            
+            self.current_theta += angular_vel * dt
+            self.current_theta = self.normalize_angle(self.current_theta)
 
         odom_quat_orientation = ros_tf.transformations.quaternion_from_euler(
             0, 0, self.current_theta)

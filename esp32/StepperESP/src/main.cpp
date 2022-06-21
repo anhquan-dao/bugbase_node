@@ -99,6 +99,9 @@ boolean test_flag = false;
 
 void loop()
 {	
+	// Test bang-bang stall fixing strategy
+	stepper.StallDetection();
+
 	if(Serial.available() < 1)
 	{	
 		

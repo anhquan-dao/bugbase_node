@@ -338,6 +338,56 @@ void StepperESP::SetDynamicAcceleration()
 	}
 	
 }
+void StepperESP::SetDynamicAcceleration(boolean playground_enable)
+{	
+	if(playground_enable == false)
+	{
+		SetDynamicAcceleration();
+	}
+	else
+	{
+		
+	}
+	
+}
+int StepperESP::StallDetection()
+{	
+	float motor_encoder_ratio = 5.34;
+	int32_t threshold[3] = {500, 1000, 2000};
+
+	if(millis() - speed_overwrite_timer > speed_overwrite_timer_threshold)
+	{
+		speed_overwrite = false;
+	}
+
+	int32_t tick_diff_0 = tick_speed_est[0] - tick_speed[0] * motor_encoder_ratio;
+	int32_t tick_diff_1 = tick_speed_est[1] - tick_speed[1] * motor_encoder_ratio;
+
+	if(abs(tick_diff_0) > threshold[0] || abs(tick_diff_1) > threshold[0])
+	{
+		sendCustomMessage("Stall Debugging: Motor stall detected");
+		sendCustomMessageHeader();
+		if(!disableTx)
+		{
+			Serial.print("Stall difference: "); 
+			Serial.println(tick_diff_0);
+		}
+		Serial.print("Stall difference: "); Serial.println(tick_diff_0);
+		setSpeed(0, 0);
+		speed_overwrite = true;
+		speed_overwrite_timer = millis();
+
+		if(abs(tick_diff_0) > threshold[0])
+		{
+			return MOTOR_1_STALL_STATUS_MASK;
+		}
+		if(abs(tick_diff_1) > threshold[0])
+		{
+			return MOTOR_2_STALL_STATUS_MASK;
+		}
+	}
+	return 0;
+}
 void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)
 {
 	stepper[0]->setAcceleration(accel0);

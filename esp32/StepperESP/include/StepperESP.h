@@ -238,8 +238,32 @@ public:
      */
     void SetDynamicAcceleration();
 
+    /**
+     * Continuously acquire ramp state from the FastAccelStepper libray and determine
+     * the required acceleration. Similar to the SetAccelerationMode function, but used
+     * in a task loop instead of when setting speed.
+     */
+    void SetDynamicAcceleration(boolean playground_enable);
 
+    #define MOTOR_1_MINOR_STALL       0x0001
+    #define MOTOR_1_STALL             0x0002
+    #define MOTOR_1_SEVERE_STALL      0x0003
+    #define MOTOR_1_STALL_STATUS_MASK 0x00FF
 
+    #define MOTOR_2_MINOR_STALL       0x0100
+    #define MOTOR_2_STALL             0x0200
+    #define MOTOR_2_SEVERE_STALL      0x0300
+    #define MOTOR_2_STALL_STATUS_MASK 0xFF00
+
+    boolean speed_overwrite = false;
+    uint32_t speed_overwrite_timer = 0;
+    uint32_t speed_overwrite_timer_threshold = 400;
+
+    /**
+     * Detect stall in stepper motors by comparing estimated tick velocity and
+     * the actual tick velocity.
+     */
+    int StallDetection();
 
     /**
      * @brief Set the Acceleration of the output steps
