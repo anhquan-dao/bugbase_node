@@ -125,6 +125,11 @@ void StepperESP::readInitParam(){
 				dt = *(float *)(&data[0]);
 				init_checklist = init_checklist|0x04;
 			}
+			else if((cmd == MSG_HEADER::READ_TEST_ENABLE))
+			{	
+				Serial.read();
+				feature_test_enable = Serial.read();
+			}
 		}
 	}
 	if(init_checklist != 0x07)
@@ -149,7 +154,8 @@ void StepperESP::readInitParam(){
 		Serial.print(acceleration_val[3]); Serial.print(" ");
 		Serial.print(boundary_speed); Serial.print(" ");
 		Serial.print(boundary_speed2); Serial.print(" ");
-		Serial.println(dt);
+		Serial.print(dt); Serial.print(" ");
+		Serial.println(feature_test_enable);
 		disableTx = false;
 		re_init = false;
 	}
@@ -350,19 +356,29 @@ void StepperESP::SetDynamicAcceleration(boolean playground_enable)
 	}
 	
 }
-int StepperESP::StallDetection()
+int StepperESP::StallDetection(int32_t est_tick_vel_0, int32_t est_tick_vel_1)
 {	
+	static uint32_t result;
 	float motor_encoder_ratio = 5.34;
 	int32_t threshold[3] = {500, 1000, 2000};
 
-	if(millis() - speed_overwrite_timer > speed_overwrite_timer_threshold)
+	if((speed_overwrite == true) && 
+	(millis() - speed_overwrite_timer > speed_overwrite_timer_threshold))
 	{
 		speed_overwrite = false;
+		speed_overwrite_timer_reset_timer = millis();
 	}
 
-	int32_t tick_diff_0 = tick_speed_est[0] - tick_speed[0] * motor_encoder_ratio;
-	int32_t tick_diff_1 = tick_speed_est[1] - tick_speed[1] * motor_encoder_ratio;
+	if((speed_overwrite == false)
+	 && (millis() - speed_overwrite_timer_reset_timer < speed_overwrite_timer_reset_timer_threshold))
+	{	
+		result &= MOTOR_OVERWRITE_ZERO;
+		return result;
+	}
 
+	int32_t tick_diff_0 = est_tick_vel_0 - tick_speed[0] * motor_encoder_ratio;
+	int32_t tick_diff_1 = est_tick_vel_1 - tick_speed[1] * motor_encoder_ratio;
+	
 	if(abs(tick_diff_0) > threshold[0] || abs(tick_diff_1) > threshold[0])
 	{
 		sendCustomMessage("Stall Debugging: Motor stall detected");
@@ -370,22 +386,30 @@ int StepperESP::StallDetection()
 		if(!disableTx)
 		{
 			Serial.print("Stall difference: "); 
-			Serial.println(tick_diff_0);
+			Serial.print(tick_diff_0); Serial.print("      ");
+			Serial.println(tick_diff_1);
 		}
 		Serial.print("Stall difference: "); Serial.println(tick_diff_0);
-		setSpeed(0, 0);
+		// setSpeed(0, 0);
 		speed_overwrite = true;
 		speed_overwrite_timer = millis();
+		result |= MOTOR_OVERWRITE_ZERO;
 
 		if(abs(tick_diff_0) > threshold[0])
-		{
-			return MOTOR_1_STALL_STATUS_MASK;
+		{	
+			result |= MOTOR_1_STALL;
 		}
 		if(abs(tick_diff_1) > threshold[0])
-		{
-			return MOTOR_2_STALL_STATUS_MASK;
+		{	
+			result |= MOTOR_2_STALL;
 		}
+		return result;
 	}
+
+	speed_overwrite_timer_reset_timer = millis();
+
+	result &= ~MOTOR_OVERWRITE_COMMAND_MASK;
+	result &= ~MOTOR_STALL_STATUS_MASK;
 	return 0;
 }
 void StepperESP::setAcceleration(int16_t accel0, int16_t accel1)

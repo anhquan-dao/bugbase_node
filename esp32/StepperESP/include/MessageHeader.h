@@ -31,6 +31,7 @@ class ESP32MessageHeader
         static const int16_t READ_DYNAMIC_ACCEL_CFG = 0x7957;
         static const int16_t READ_UPDATE_PERIOD_CFG = 0x7958;
         static const int16_t READ_ENCODER_CFG       = 0x7959;
+        static const int16_t READ_TEST_ENABLE       = 0x7953;
 };
 
 #endif

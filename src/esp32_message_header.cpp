@@ -27,6 +27,7 @@ class ROSInterfaceMessageHeader
         const int16_t WRITE_DYNAMIC_ACCEL_CFG = ESP32MessageHeader::READ_DYNAMIC_ACCEL_CFG;
         const int16_t WRITE_UPDATE_PERIOD_CFG = ESP32MessageHeader::READ_UPDATE_PERIOD_CFG;
         const int16_t WRITE_ENCODER_CFG       = ESP32MessageHeader::READ_ENCODER_CFG;
+        const int16_t WRITE_TEST_ENABLE       = ESP32MessageHeader::READ_TEST_ENABLE;
         
 };
 
@@ -54,5 +55,6 @@ BOOST_PYTHON_MODULE(esp32_message_header)
         .def_readonly("WRITE_DYNAMIC_ACCEL_CFG", &ROSInterfaceMessageHeader::WRITE_DYNAMIC_ACCEL_CFG)
         .def_readonly("WRITE_UPDATE_PERIOD_CFG", &ROSInterfaceMessageHeader::WRITE_UPDATE_PERIOD_CFG)
         .def_readonly("WRITE_ENCODER_CFG", &ROSInterfaceMessageHeader::WRITE_ENCODER_CFG)
+        .def_readonly("WRITE_TEST_ENABLE", &ROSInterfaceMessageHeader::WRITE_TEST_ENABLE)
     ;
 }

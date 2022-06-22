@@ -99,8 +99,6 @@ boolean test_flag = false;
 
 void loop()
 {	
-	// Test bang-bang stall fixing strategy
-	stepper.StallDetection();
 
 	if(Serial.available() < 1)
 	{	
@@ -141,6 +139,11 @@ void loop()
 		}
 	}
 
+	if(stepper.speed_overwrite == true)
+	{
+		stepper.set_tick_speed[0] = 0;
+		stepper.set_tick_speed[1] = 0;
+	}
 	stepper.setSpeed(stepper.set_tick_speed[0], stepper.set_tick_speed[1]);
 	stepper.SetDynamicAcceleration();
 
@@ -226,8 +229,22 @@ void encoder_read_task(void *pvParameters)
 				set_tick_vel[0] = rcvMessage.set_tick_vel[0];
 				set_tick_vel[1] = rcvMessage.set_tick_vel[1];
 			}
-		}	
+		}
+		// Test bang-bang stall fixing strategy
+		
 		stepper.getEncoderSpeed();
+
+		if(stepper.feature_test_enable == 0x01)
+		{
+			int stall_result = stepper.StallDetection(est_tick_vel[0], est_tick_vel[1]);
+			stepper.sendCustomMessageHeader();
+			if(!stepper.disableTx)
+			{
+				Serial.print("Stall status: ");
+				Serial.println(stall_result, HEX);
+			}
+		}	
+		
 		stepper.sendSpeedProfile(est_tick_vel[0], est_tick_vel[1], set_tick_accel[0], set_tick_accel[1]);
 		
 

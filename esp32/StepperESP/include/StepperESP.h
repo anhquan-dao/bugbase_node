@@ -61,6 +61,8 @@ public:
     // Bit field for checking configuration message 
     uint8_t init_checklist = 0x00;
 
+    uint8_t feature_test_enable = 0x00;
+
     enum QUEUE_STATE{
         STEPPER0_FULL,
         STEPPER1_FULL,
@@ -248,22 +250,29 @@ public:
     #define MOTOR_1_MINOR_STALL       0x0001
     #define MOTOR_1_STALL             0x0002
     #define MOTOR_1_SEVERE_STALL      0x0003
-    #define MOTOR_1_STALL_STATUS_MASK 0x00FF
+    #define MOTOR_1_STALL_STATUS_MASK 0x000F
 
     #define MOTOR_2_MINOR_STALL       0x0100
     #define MOTOR_2_STALL             0x0200
     #define MOTOR_2_SEVERE_STALL      0x0300
-    #define MOTOR_2_STALL_STATUS_MASK 0xFF00
+    #define MOTOR_2_STALL_STATUS_MASK 0x0F00
 
-    boolean speed_overwrite = false;
+    #define MOTOR_STALL_STATUS_MASK   MOTOR_1_STALL_STATUS_MASK & MOTOR_2_STALL_STATUS_MASK
+
+    #define MOTOR_OVERWRITE_ZERO      0x1010
+    #define MOTOR_OVERWRITE_COMMAND_MASK   0xF0F0
+
+    volatile boolean speed_overwrite = false;
     uint32_t speed_overwrite_timer = 0;
-    uint32_t speed_overwrite_timer_threshold = 400;
+    const uint32_t speed_overwrite_timer_threshold = 400;
+    uint32_t speed_overwrite_timer_reset_timer = 0;
+    const uint32_t speed_overwrite_timer_reset_timer_threshold = 200;
 
     /**
      * Detect stall in stepper motors by comparing estimated tick velocity and
      * the actual tick velocity.
      */
-    int StallDetection();
+    int StallDetection(int32_t est_tick_vel_0, int32_t est_tick_vel_1);
 
     /**
      * @brief Set the Acceleration of the output steps

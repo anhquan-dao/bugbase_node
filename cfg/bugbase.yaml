@@ -31,10 +31,12 @@ visualizer: true
 
 odom_topic: '/odom/wheel'
 
-playground_enable: false
+playground_enable: true
 # ==================================
 # TEST PARAMETERS
 angular_acceleration: 0.5 # rad/s
+
+feature_test_enable: 1
 
 # ==================================
 

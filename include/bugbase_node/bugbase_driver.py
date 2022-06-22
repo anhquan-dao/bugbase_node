@@ -60,6 +60,7 @@ class ESP32BugBase:
         # PLAYGROUND SECTION
 
         self.PLAYGROUND_ENABLE = params["playground_enable"]
+        self.FEATURE_TO_TEST = params["feature_test_enable"]
 
         # Differentiate acceleration and deceleration following Khue's suggestion
         self.vel_timer = time.time()
@@ -265,6 +266,14 @@ class ESP32BugBase:
         self.writebyte(0x00)
         self.writelong((update_rate_i>>24) & 0xff, (update_rate_i >> 16) & 0xff,
                        (update_rate_i>>8 ) & 0xff,  update_rate_i & 0xff)
+
+    def setUpdateTestFeature(self, feature_to_test = None):
+        if feature_to_test == None:
+            feature_to_test = self.FEATURE_TO_TEST
+
+        self.send_command(self.MSG_HEADER.WRITE_TEST_ENABLE)
+        self.writebyte(0x00); 
+        self.writebyte(feature_to_test)
     
     def sendShutdownRequest(self):
         
@@ -288,6 +297,9 @@ class ESP32BugBase:
 
     def writeInitParam(self):
 
+        if(self.PLAYGROUND_ENABLE):
+            self.setUpdateTestFeature()
+            
         self.setAcceleration()
         self.setUpdatePeriod()
         self.setDynamicAcceleration()
