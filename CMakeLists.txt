@@ -52,6 +52,7 @@ catkin_install_python(
   PROGRAMS 
     nodes/driver_node.py 
     nodes/speed_test_node.py
+    nodes/test_node.py
   DESTINATION
     ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
