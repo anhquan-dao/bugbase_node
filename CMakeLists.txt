@@ -53,6 +53,7 @@ catkin_install_python(
     nodes/driver_node.py 
     nodes/speed_test_node.py
     nodes/test_node.py
+    nodes/test_rotate_in_place.py
   DESTINATION
     ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
