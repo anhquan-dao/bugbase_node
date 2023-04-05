@@ -16,6 +16,15 @@ from nav_msgs.msg import Odometry
 
 from bugbase_node.test_odrive import ODriveInterface, ODriveRampControl, ODriveLivePlotter
 
+class ROSLogger(object):
+    """Imitate a standard Python logger, but pass the messages to rospy logging.
+    """
+    def debug(self, msg):    rospy.logdebug(msg) 
+    def info(self, msg):     rospy.loginfo(msg)
+    def warn(self, msg):     rospy.logwarn(msg)
+    def error(self, msg):    rospy.logerr(msg)
+    def critical(self, msg): rospy.logfatal(msg)
+
 class ODriveNode:
 
     def __init__(self, params = dict()):
@@ -31,8 +40,8 @@ class ODriveNode:
             if(default_key not in params.keys()):
                 params[default_key] = self.__default_params[default_key]
 
-        self.odrive = ODriveInterface(params)
-        self.ramp_control = ODriveRampControl(params)
+        self.odrive = ODriveInterface(params, ROSLogger)
+        # self.ramp_control = ODriveRampControl(params)
 
         self.error_diag_updater = diagnostic_updater.Updater()
         self.error_diag_updater.setHardwareID("none")
@@ -49,7 +58,10 @@ class ODriveNode:
         self.current_pose = Pose()
         self.odom = Odometry()
 
-        self.odom_calculation_rate_Hz = params["odom_calculation_Hz"]
+        self.odom_calculation_rate_Hz = params["odom_calculation_rate_Hz"]
+        self.control_rate_Hz = params["control_rate_Hz"]
+
+        self.axis_vel = [0,0]
 
         self.update_diagnostics_timer_active = False
         self.calculate_odom_timer_active     = False
@@ -133,7 +145,7 @@ class ODriveNode:
 
         return wheel_ramp[0], wheel_ramp[1]
 
-    def velocity_command_callback(self, linear_vel, angular_vel):
+    def convert_to_wheel_vel(self, linear_vel, angular_vel):
 
         base_width       = self.odrive.base_width
         rounds_per_meter = self.odrive.rounds_per_meter
@@ -158,16 +170,17 @@ class ODriveNode:
      
         return vl_rpm, vr_rpm
 
-    def cmd_callback(self, cmd):   
+    def cmd_callback(self, cmd): 
+        if not self.cmd_vel_callback_active:
+            return
+
         self.mutex.acquire()
         try:
-            if not self.cmd_vel_callback_active:
-                return
+            # Convert velocity command to axis velocity rpm
+            self.vl_rpm_input, self.vr_rpm_input = self.convert_to_wheel_vel(cmd.linear.x, cmd.angular.z)
 
-            # Convert velocity command to rpm
-            vl_rpm_input, vr_rpm_input = self.velocity_command_callback(cmd.linear.x, cmd.angular.z)
-            
-            self.vl_rpm_input, self.vr_rpm_input = vl_rpm_input, vr_rpm_input
+            self.odrive.drive(left_vel_rpm  = self.vl_rpm_input, \
+                            right_vel_rpm = self.vr_rpm_input)
         finally:
             self.mutex.release()
     
@@ -260,10 +273,7 @@ class ODriveNode:
         
         self.mutex.acquire()
         try:
-            self.odrive.drive(left_vel_rpm  = self.vl_rpm_input, \
-                            right_vel_rpm = self.vr_rpm_input, \
-                            left_vel_ramp_rpm  = vl_ramp_rpm, \
-                            right_vel_ramp_rpm = vr_ramp_rpm)
+            pass
 
         finally:
             self.mutex.release()
@@ -271,20 +281,19 @@ class ODriveNode:
     def main(self):
         self.update_diagnostics_timer = rospy.Timer(rospy.Duration(1), self.update_diagnostics)
         self.calculate_odom_timer     = rospy.Timer(rospy.Duration(1.0/self.odom_calculation_rate_Hz), self.calculate_odom)
-        self.control_timer            = rospy.Timer(rospy.Duration(1.0/self.control_rate_Hz), self.calculate_odom)
 
-        liveplotter = ODriveLivePlotter(lambda: [-odrive_node.odrive.axes[0].encoder.vel_estimate, \
-                                    -odrive_node.odrive.axes[0].controller.vel_setpoint, \
-                                    odrive_node.odrive.axes[0].controller.config.vel_ramp_rate, \
-                                    -odrive_node.odrive.axes[0].motor.current_control.Iq_measured, \
-                                    -odrive_node.odrive.axes[0].motor.current_control.Iq_setpoint])
+        # liveplotter = ODriveLivePlotter(lambda: [-odrive_node.odrive.axes[0].encoder.vel_estimate, \
+        #                             -odrive_node.odrive.axes[0].controller.vel_setpoint, \
+        #                             odrive_node.odrive.axes[0].controller.config.vel_ramp_rate, \
+        #                             -odrive_node.odrive.axes[0].motor.current_control.Iq_measured, \
+        #                             -odrive_node.odrive.axes[0].motor.current_control.Iq_setpoint])
 
-        rospy.Timer(rospy.Duration(0.01), liveplotter.draw_data)
+        # rospy.Timer(rospy.Duration(0.01), liveplotter.draw_data)
 
         while not rospy.is_shutdown():
             time.sleep(0.02)
 
-            liveplotter.fetch_data(self.mutex)
+            # liveplotter.fetch_data(self.mutex)
 
             self.mutex.acquire()
             try:
@@ -322,6 +331,8 @@ if __name__ == "__main__":
         params[param_list[i]] = rospy.get_param("~"+param_list[i])
     
     odrive_node = ODriveNode(params)
+
+    rospy.on_shutdown(odrive_node.odrive.idle)
     
     try:
         odrive_node.main()

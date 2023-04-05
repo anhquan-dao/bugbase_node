@@ -100,6 +100,7 @@ class ODriveInterface:
         else:
             self.logger = default_logger
 
+        self.odrive_enable_watchdog = params["enable_watchdog"]
         self.odrive_watchdog_timeout = params["odrive_watchdog_timeout"]
 
         self.odrive_axis_error = (self.ODriveError(), self.ODriveError())
@@ -152,11 +153,11 @@ class ODriveInterface:
             self.logger.info("Try to configure axis %d" %(i))
 
             # Enable watchdog timer
-            if(axis.config.enable_watchdog == False \
+            if(axis.config.enable_watchdog != self.odrive_enable_watchdog \
             or abs(axis.config.watchdog_timeout - self.odrive_watchdog_timeout) > 1e-3):
 
                 self.logger.info("\tTry to enable watchdog timeout")
-                axis.config.enable_watchdog = True
+                axis.config.enable_watchdog = self.odrive_enable_watchdog
                 axis.config.watchdog_timeout = self.odrive_watchdog_timeout
 
                 need_reset |= True
@@ -184,24 +185,24 @@ class ODriveInterface:
             self.logger.info("\t  Input Mode: %s" %(InputMode(axis.controller.config.input_mode)))
 
             # Set current control parameter
-            if(abs(axis.motor.config.current_lim - 15) >  1e-3 \
-            or abs(axis.motor.config.current_control_bandwidth - 100) > 1e-3 \
-            or abs(axis.controller.config.torque_ramp_rate - 0.05) > 1e-3):
+            # if(abs(axis.motor.config.current_lim - 15) >  1e-3 \
+            # or abs(axis.motor.config.current_control_bandwidth - 100) > 1e-3 \
+            # or abs(axis.controller.config.torque_ramp_rate - 0.05) > 1e-3):
 
-                self.logger.info("\tTry to configure current control")
+            #     self.logger.info("\tTry to configure current control")
                 
-                axis.motor.config.current_lim = 15
-                axis.motor.config.current_control_bandwidth = 100
-                axis.controller.config.torque_ramp_rate = 0.05
+            #     axis.motor.config.current_lim = 15
+            #     axis.motor.config.current_control_bandwidth = 100
+            #     axis.controller.config.torque_ramp_rate = 0.05
 
-                need_reset |= True
+            #     need_reset |= True
 
-            else:
-                self.logger.info("\tCurrent control has already been configured") 
+            # else:
+            #     self.logger.info("\tCurrent control has already been configured") 
 
-            self.logger.info("\t  %f" %(axis.motor.config.current_lim))
-            self.logger.info("\t  %f" %(axis.motor.config.current_control_bandwidth))
-            self.logger.info("\t  %f" %(axis.controller.config.torque_ramp_rate))
+            # self.logger.info("\t  %f" %(axis.motor.config.current_lim))
+            # self.logger.info("\t  %f" %(axis.motor.config.current_control_bandwidth))
+            # self.logger.info("\t  %f" %(axis.controller.config.torque_ramp_rate))
 
             self.watchdog_feed()
 
@@ -222,6 +223,7 @@ class ODriveInterface:
             self.logger.info("Try to engage ODrive")
             for axis in self.axes:
                 axis.controller.input_vel = 0.0
+                time.sleep(1)
                 axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
 
             self.watchdog_feed()  
@@ -297,15 +299,15 @@ class ODriveInterface:
         if (not self.driver) or (not self.axes):
             return False
         
-        self.axes[0].watchdog_feed()
-        self.axes[1].watchdog_feed()
+        # self.axes[0].watchdog_feed()
+        # self.axes[1].watchdog_feed()
 
         return True
 
     def drive(self, left_vel_rpm, right_vel_rpm, left_vel_ramp_rpm=None, right_vel_ramp_rpm=None):
         if (not self.driver) or (not self.axes):
             return False
-
+            
         if(left_vel_ramp_rpm):
             self.axes[0].controller.config.vel_ramp_rate = left_vel_ramp_rpm
 
@@ -314,7 +316,10 @@ class ODriveInterface:
 
         self.axes[0].controller.input_vel = left_vel_rpm
         self.axes[1].controller.input_vel = right_vel_rpm
-    
+
+        # self.logger.info(self.axes[0].controller.input_vel)
+        # self.logger.info(self.axes[1].controller.input_vel)
+
         return self.watchdog_feed()
 
     def get_ticks(self):
@@ -352,13 +357,13 @@ class ODriveInterface:
             except KeyboardInterrupt:
                 sys.exit()
             except Exception as ex:
-                print("Failed to connect due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
+                default_logger.error("Failed to connect due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
                 return False
 
         axes = [dev.axis0, dev.axis1]
 
-        print("Setting before anticogging calibration")
-        print("\tDisable watchdog timer")
+        default_logger.info("Setting before anticogging calibration")
+        default_logger.info("\tDisable watchdog timer")
 
         dev.axis0.config.enable_watchdog = False
         dev.axis1.config.enable_watchdog = False
@@ -366,9 +371,9 @@ class ODriveInterface:
         try:
             dev.save_configuration()
         except fibre.libfibre.ObjectLostError:
-            print("Save ODrive configuration")
+            default_logger.info("Save ODrive configuration")
         except Exception as ex:
-            print("Failed to save configuration due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
+            default_logger.info("Failed to save configuration due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
 
         dev = odrive.find_any(timeout=30)
         axes = [dev.axis0, dev.axis1]
@@ -384,8 +389,8 @@ class ODriveInterface:
             pos_gain[i] = axes[i].controller.config.pos_gain
             vel_integrator_gain[i] = axes[i].controller.config.vel_integrator_gain 
 
-            print("\tPosition gain of axis %d: %f" %(i, pos_gain[i]))
-            print("\tVelocity I-gain of axis %d: %f" %(i, vel_integrator_gain[i]))
+            default_logger.info("\tPosition gain of axis %d: %f" %(i, pos_gain[i]))
+            default_logger.info("\tVelocity I-gain of axis %d: %f" %(i, vel_integrator_gain[i]))
 
             axes[i].requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
 
@@ -398,9 +403,7 @@ class ODriveInterface:
             # axes[i].controller.config.anticogging.calib_pos_threshold = 2
             # axes[i].controller.config.anticogging.calib_vel_threshold = 2
 
-        print("Start anticogging calibration")
-
-        time.sleep(1)
+        default_logger.info("Start anticogging calibration")
 
         axes[0].requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         axes[1].requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
@@ -408,16 +411,12 @@ class ODriveInterface:
         axes[0].controller.start_anticogging_calibration()
         axes[1].controller.start_anticogging_calibration()
 
-        print("\tState of axis 0: %d" %(AxisState(axes[0].current_state)))
-        print("\tState of axis 1: %d" %(AxisState(axes[1].current_state)))
+        default_logger.info("\tState of axis 0: %d" %(AxisState(axes[0].current_state)))
+        default_logger.info("\tState of axis 1: %d" %(AxisState(axes[1].current_state)))
 
         while axes[0].controller.config.anticogging.calib_anticogging \
         or axes[1].controller.config.anticogging.calib_anticogging:
-            print("Axis 0 anticogging calibration state: %d" %(axes[0].controller.config.anticogging.calib_anticogging))
-            print("\tAxis 0 at index: %d" %(axes[0].controller.config.anticogging.index))
-            print("Axis 1 anticogging calibration state: %d" %(axes[1].controller.config.anticogging.calib_anticogging))
-            print("\tAxis 1 at index: %d" %(axes[1].controller.config.anticogging.index))
-            print("----------------------------")
+            default_logger.info(".".rstrip("\n"))
             time.sleep(1)
 
         for i in range(2):
@@ -425,6 +424,8 @@ class ODriveInterface:
 
             axes[i].controller.config.pos_gain = pos_gain[i]
             axes[i].controller.config.vel_integrator_gain = vel_integrator_gain[i]
+        
+        dev.save_configuration()
 
     def get_error(self):
         if (not self.driver) or (not self.axes):
@@ -585,15 +586,12 @@ if __name__ == "__main__":
 
     while True:
         if driver.driver:
-            print("OK")
             driver.velocity_command_callback(1.0, 0.5)
             time.sleep(0.5)
-            continue
 
         else:
             if driver.connect():
                 driver.engage()
-
             else:
                 time.sleep(0.5)
 
