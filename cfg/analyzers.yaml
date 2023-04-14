@@ -1,0 +1,5 @@
+analyzers:
+  motors:
+    type: GenericAnalyzer
+    path: Motors
+    startswith: 'ODrive'

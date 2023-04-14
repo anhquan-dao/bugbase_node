@@ -96,7 +96,7 @@ class ODriveInterface:
         self.axes = None
 
         if logger:
-            self.logger = logging.setLoggerClass(logger)
+            self.logger = logger
         else:
             self.logger = default_logger
 

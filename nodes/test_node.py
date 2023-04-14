@@ -25,6 +25,8 @@ class ROSLogger(object):
     def error(self, msg):    rospy.logerr(msg)
     def critical(self, msg): rospy.logfatal(msg)
 
+ros_logger = ROSLogger()
+
 class ODriveNode:
 
     def __init__(self, params = dict()):
@@ -40,7 +42,7 @@ class ODriveNode:
             if(default_key not in params.keys()):
                 params[default_key] = self.__default_params[default_key]
 
-        self.odrive = ODriveInterface(params, ROSLogger)
+        self.odrive = ODriveInterface(params, ros_logger)
         # self.ramp_control = ODriveRampControl(params)
 
         self.error_diag_updater = diagnostic_updater.Updater()
@@ -299,7 +301,6 @@ class ODriveNode:
             try:
                 if self.odrive.driver:
                     if self.axis_error[0] != 0 or self.axis_error[1] != 0:
-                        print("ERROR")
                         self.cmd_vel_callback_active         = False
                         self.update_diagnostics_timer_active = False
                         self.calculate_odom_timer_active     = False

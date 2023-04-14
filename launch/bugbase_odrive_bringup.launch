@@ -22,4 +22,11 @@
         <remap from="joy" to="$(arg joy_topic)" />
     </node>
 
+    <node pkg="diagnostic_aggregator" type="aggregator_node"
+        name="diagnostic_aggregator" >
+    <!-- Load the file you made above -->
+        <rosparam command="load" 
+                file="$(find bugbase_node)/cfg/analyzers.yaml" />
+    </node>
+
 </launch>
