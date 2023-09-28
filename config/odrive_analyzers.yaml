@@ -1,0 +1,6 @@
+analyzers:
+  ros__parameters:
+    motors:
+      type: GenericAnalyzer
+      path: Motors
+      startswith: 'ODrive'

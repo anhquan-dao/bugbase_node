@@ -1,4 +1,0 @@
-int64 velocity
-int64 est_velocity
-int64 set_velocity
-int64 acceleration

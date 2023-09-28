@@ -1,0 +1,16 @@
+<launch>
+
+    <arg name="cmd_vel_topic" default="/cmd_vel"/>
+
+    <node pkg="joy_linux" exec="joy_linux_node" name="joy_node" namespace="bugbase_bringup"/>
+
+    <node pkg="teleop_twist_joy" exec="teleop_node" name="teleop_node" namespace="bugbase_bringup">
+        <param from="$(find-pkg-share bugbase_node)/config/rc_control.yaml"/>
+        <remap from="cmd_vel" to="$(var cmd_vel_topic)"/>
+    </node>
+
+    <node pkg="bugbase_node" exec="odrive_node" name="odrive_node" namespace="bugbase_bringup">
+        <param from="$(find-pkg-share bugbase_node)/config/rc_control.yaml"/>
+        <remap from="cmd_vel" to="$(var cmd_vel_topic)"/>
+    </node>
+</launch>

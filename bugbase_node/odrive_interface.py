@@ -1,7 +1,3 @@
-#!/usr/bin/python3
-import serial
-from serial.serialutil import SerialException
-
 import sys
 import time
 import logging
@@ -17,71 +13,64 @@ import fibre
 import matplotlib
 import matplotlib.pyplot as plt
 
-default_logger = logging.getLogger(__name__)
-default_logger.setLevel(logging.DEBUG)
 
-# create console handler and set level to debug
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+class ODriveError:
+    def __init__(self):
+        self.axis_error = 0
+        self.encoder_error = 0
+        self.motor_error = 0
+        self.controller_error = 0
 
-default_logger.addHandler(ch)
+    def __eq__(self, other):
+        if type(other) != int:
+            return False
 
+        return self.axis_error \
+            + self.encoder_error \
+            + self.motor_error \
+            + self.controller_error == other
+
+    def __ne__(self, other):
+        if type(other) != int:
+            return False
+
+        return self.axis_error \
+            + self.encoder_error \
+            + self.motor_error \
+            + self.controller_error != other
+
+    def axis_error_name(self, axis_error=None):
+        if axis_error:
+            return AxisError(axis_error)
+
+        return AxisError(self.axis_error)
+
+    def encoder_error_name(self, encoder_error=None):
+        if encoder_error:
+            return EncoderError(encoder_error)
+            
+        return EncoderError(self.encoder_error)
+
+    def motor_error_name(self, motor_error=None):
+        if motor_error:
+            return MotorError(motor_error)
+            
+        return MotorError(self.motor_error)
+
+    def controller_error_name(self, controller_error=None):
+        if controller_error:
+            return ControllerError(controller_error)
+            
+        return ControllerError(self.controller_error)
 
 class ODriveInterface:
 
-    class ODriveError:
-        def __init__(self):
-            self.axis_error = 0
-            self.encoder_error = 0
-            self.motor_error = 0
-            self.controller_error = 0
-
-        def __eq__(self, other):
-            if type(other) != int:
-                return False
-
-            return self.axis_error \
-                + self.encoder_error \
-                + self.motor_error \
-                + self.controller_error == other
-
-        def __ne__(self, other):
-            if type(other) != int:
-                return False
-
-            return self.axis_error \
-                + self.encoder_error \
-                + self.motor_error \
-                + self.controller_error != other
-
-        def axis_error_name(self, axis_error=None):
-            if axis_error:
-                return AxisError(axis_error)
-
-            return AxisError(self.axis_error)
-
-        def encoder_error_name(self, encoder_error=None):
-            if encoder_error:
-                return EncoderError(encoder_error)
-                
-            return EncoderError(self.encoder_error)
-
-        def motor_error_name(self, motor_error=None):
-            if motor_error:
-                return MotorError(motor_error)
-                
-            return MotorError(self.motor_error)
-
-        def controller_error_name(self, controller_error=None):
-            if controller_error:
-                return ControllerError(controller_error)
-                
-            return ControllerError(self.controller_error)
+    MAX_CONNECTION_ATTEMPT = 2
                          
     def __init__(self, params = dict(), logger = None):
 
-        self.__default_params = {"enable_watchdog": True,
-                                "odrive_watchdog_timeout": 2.0,
+        self.__default_params = {"odrive_watchdog_enable": True,
+                                "odrive_watchdog_timeout": 5.0,
                                 "wheel_direction": False,
                                 "turn_direction": False,
                                 "base_width": 0.5,
@@ -98,12 +87,12 @@ class ODriveInterface:
         if logger:
             self.logger = logger
         else:
-            self.logger = default_logger
+            raise Exception("No logger pass to %s"%(self.__class__.__name__))
 
-        self.odrive_enable_watchdog = params["enable_watchdog"]
+        self.odrive_enable_watchdog = params["odrive_watchdog_enable"]
         self.odrive_watchdog_timeout = params["odrive_watchdog_timeout"]
 
-        self.odrive_axis_error = (self.ODriveError(), self.ODriveError())
+        self.odrive_axis_error = (ODriveError(), ODriveError())
 
         self.wheel_direction = params["wheel_direction"]
         self.turn_direction = params["turn_direction"]
@@ -112,135 +101,131 @@ class ODriveInterface:
         self.rounds_per_meter = float(params["rounds_per_meter"])
 
         self.ticks_per_round = None
-        pass
+
+        self.idle_fail = 0
+        self.engage_fail = 0
+
+        self.connection_attempt = 0
 
     def __del__(self):
+        self.idle()
         self.idle()
 
     def connect(self):
 
-        self.logger.info("Try connecting to ODrive...")
+        # Try to connect to ODrive and set watchdog timeout.
         if self.driver:
-            self.logger.info("Already connected. Disconnecting and reconnecting.")
             return True
+
+        self.connection_attempt += 1
+
+        dev = None
         try:
-            self.driver = odrive.find_any(timeout=30)
-            self.watchdog_feed()
+            dev = odrive.find_any(timeout=1)
         except KeyboardInterrupt:
             sys.exit()
         except Exception as ex:
-            self.logger.error("Failed to connect due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
+            self.logger.error("Try connecting ODrive: Failed to connect due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
             return False
+
+        self.driver = dev
+        self.watchdog_feed()
 
         self.axes = (self.driver.axis0, self.driver.axis1)
-        if(self.axes[0].error != 0 or self.axes[1].error != 0):
-            self.logger.error("Axis0 error: %d. Axis1 error: %d" %(self.axes[0].error, self.axes[1].error))
+        if(self.axes[0].error == AxisError.NONE 
+        and self.axes[1].error == AxisError.NONE):
+            return self.configure_timeout()
+               
+        # Handle AxisError.WATCHDOG_TIMER_EXPIRED
+        # This is oftern caused by previously set small watchdog timeout.
+        # If the time between the odrive reboot and connection exceeds the set watchdog timeout,
+        # the error will occur before any watchdog_feed function is carried out.
+        # SOLUTION:
+        #  - Set the watchdog timeout to 10.0 seconds (sufficiently large).
+        #  - Save configuration.
+        # The ODrive will be ready to be connected again via self.connect()
+        if(self.axes[0].error == AxisError.WATCHDOG_TIMER_EXPIRED 
+        or self.axes[1].error == AxisError.WATCHDOG_TIMER_EXPIRED):
+            if(self.connection_attempt == self.MAX_CONNECTION_ATTEMPT):
+                self.logger.error("Try connecting ODrive: caught WATCHDOG_TIMER_EXPIRED")
+                return False
+            
+            self.logger.warning("Try connecting ODrive: caught WATCHDOG_TIMER_EXPIRED")
+            self.axes[0].config.watchdog_timeout = 10.0
+            self.axes[1].config.watchdog_timeout = 10.0
+            self.save_configuration()  
+    
+            return self.connect()            
+            
+        else:
+            self.logger.error("Try connecting ODrive: Unexpected error")
+            self.logger.error("\t Axis0 error: %s. Axis1 error: %s" %(AxisError(self.axes[0].error).name, AxisError(self.axes[1].error).name))
             self.reboot()
-            return False
 
+        return False
+
+    def configure_timeout(self, timeout=None):
+        if timeout == None:
+            timeout = self.odrive_watchdog_timeout
+
+        # Force ODrive to be in idle state before configuring watchdog timeout
         for i in range(5):
             self.watchdog_feed()
             if self.idle():
                 break
-            time.sleep(0.2)
+            time.sleep(0.1)
         else:
             self.driver = None
             return False
 
-        need_reset = False
-
+        # Set the desired watchdog timeout without saving the configuration
         for i, axis in enumerate(self.axes):
-            self.logger.info("Try to configure axis %d" %(i))
-
-            # Enable watchdog timer
+            
             if(axis.config.enable_watchdog != self.odrive_enable_watchdog \
             or abs(axis.config.watchdog_timeout - self.odrive_watchdog_timeout) > 1e-3):
 
-                self.logger.info("\tTry to enable watchdog timeout")
                 axis.config.enable_watchdog = self.odrive_enable_watchdog
-                axis.config.watchdog_timeout = self.odrive_watchdog_timeout
+                axis.config.watchdog_timeout = timeout
+                self.watchdog_feed()
 
-                need_reset |= True
+        # Get the ticks per round setting of the ODrive
+        self.ticks_per_round = (self.axes[0].encoder.config.cpr, \
+                                self.axes[1].encoder.config.cpr)
 
-            else:
-                self.logger.info("\tWatchdog has already been enabled")
+        self.logger.info("Try to connect ODrive: Successful")
 
-            self.logger.info("\t  Watchdog enable: %s" %(axis.config.enable_watchdog))
-            self.logger.info("\t  Watchdog timeout: %s" %(axis.config.watchdog_timeout))
+        return True
+    
+    def engage(self):
+        if (not self.driver) or (not self.axes):
+            return False
 
+        for axis in self.axes:
             # Enable ramped velocity control
             if(axis.controller.config.input_mode != INPUT_MODE_VEL_RAMP \
             or axis.controller.config.control_mode != CONTROL_MODE_VELOCITY_CONTROL):
 
-                self.logger.info("\tTry to set controller to Ramped Velocity Control")
                 axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
                 axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL 
 
-                need_reset |= True
+            axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
 
-            else:
-                self.logger.info("\tController has already been set to Ramped Velocity Control")
+        self.watchdog_feed()  
+        
+        if(self.axes[0].current_state != AXIS_STATE_CLOSED_LOOP_CONTROL \
+        or self.axes[1].current_state != AXIS_STATE_CLOSED_LOOP_CONTROL):
+            
+            if(self.engage_fail == 0):
+                self.logger.error("Try to engage ODrive: Cannot set axes to AXIS_STATE_CLOSED_LOOP_CONTROL")
+                self.logger.error("\t State of axis0: %s; axis1: %s" %(AxisState(self.axes[0].current_state).name, AxisState(self.axes[1].current_state).name))
+                self.engage_fail = 1
 
-            self.logger.info("\t  Control Mode: %s" %(ControlMode(axis.controller.config.control_mode)))
-            self.logger.info("\t  Input Mode: %s" %(InputMode(axis.controller.config.input_mode)))
-
-            # Set current control parameter
-            # if(abs(axis.motor.config.current_lim - 15) >  1e-3 \
-            # or abs(axis.motor.config.current_control_bandwidth - 100) > 1e-3 \
-            # or abs(axis.controller.config.torque_ramp_rate - 0.05) > 1e-3):
-
-            #     self.logger.info("\tTry to configure current control")
-                
-            #     axis.motor.config.current_lim = 15
-            #     axis.motor.config.current_control_bandwidth = 100
-            #     axis.controller.config.torque_ramp_rate = 0.05
-
-            #     need_reset |= True
-
-            # else:
-            #     self.logger.info("\tCurrent control has already been configured") 
-
-            # self.logger.info("\t  %f" %(axis.motor.config.current_lim))
-            # self.logger.info("\t  %f" %(axis.motor.config.current_control_bandwidth))
-            # self.logger.info("\t  %f" %(axis.controller.config.torque_ramp_rate))
-
-            self.watchdog_feed()
-
-        if need_reset:
-            self.save_configuration()
-            self.logger.info("Reset to save configuration")
             return False
 
-        self.ticks_per_round = (self.axes[0].encoder.config.cpr, \
-                                self.axes[1].encoder.config.cpr)
-        
-        self.watchdog_feed()
-
+        self.logger.info("Try to engage ODrive: Successful")
+        self.engage_fail = 0
         return True
-       
-    def engage(self):
-        if(self.driver and self.axes):
-            self.logger.info("Try to engage ODrive")
-            for axis in self.axes:
-                axis.controller.input_vel = 0.0
-                time.sleep(1)
-                axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
 
-            self.watchdog_feed()  
-
-            if(self.axes[0].current_state != AXIS_STATE_CLOSED_LOOP_CONTROL \
-            or self.axes[1].current_state != AXIS_STATE_CLOSED_LOOP_CONTROL):
-                
-                self.logger.error("Cannot set axes to AXIS_STATE_CLOSED_LOOP_CONTROL")
-                # self.logger.error("State of axis0: %d. State of axis1: %d" %(self.axes[0].current_state, self.axes[1].current_state))
-                
-                return False
-
-            self.logger.info("Axes have been set to AXIS_STATE_CLOSED_LOOP_CONTROL")
-            self.logger.info("Successfully engaging ODrive")
-            return True
-        
-        return False
 
     def idle(self):
         if self.driver and self.axes:
@@ -250,45 +235,51 @@ class ODriveInterface:
 
             if self.axes[0].current_state != AXIS_STATE_IDLE \
             or self.axes[1].current_state != AXIS_STATE_IDLE:
-                self.logger.error("Cannot set axes to AXIS_STATE_IDLE")
-                # self.logger.error("State of axis0: %d. State of axis1: %d" %(self.axes[0].current_state, self.axes[1].current_state))
+
+                if(self.idle_fail == 0):
+                    self.logger.error("Try to disengage ODrive: Cannot set axes to AXIS_STATE_IDLE")
+                    self.logger.error("\tState of axis0: %s; axis1: %s"%(AxisState(self.axes[0].current_state).name, AxisState(self.axes[1].current_state).name))
+                    self.idle_fail = 1
+
                 return False
 
-            self.logger.info("Axes have been set to AXIS_STATE_IDLE")
+            self.logger.info("Try to disengage ODrive: Successful")
+            self.idle_fail = 0
             return True
 
         return False
 
     def reboot(self):
         if not self.driver:
-            self.logger.error("Not connected")
+            self.logger.error("Try to reboot ODrive: No ODrive found")
             return False
 
         try:
             self.driver.reboot()
         except fibre.libfibre.ObjectLostError:
-            self.logger.error("Rebooted ODrive")
+            self.logger.info("Try to reboot ODrive: Successful")
             self.driver = None
         except Exception as ex:
-            self.logger.error("Failed to reboot due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
+            self.logger.error("Try to reboot ODrive: Failed to reboot due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
         finally:
             self.driver = None
             self.axes   = None
+            self.connection_attempt = 0
         
         return True
 
     def save_configuration(self):
         if not self.driver:
-            self.logger.error("Not connected")
+            self.logger.error("Try to save ODrive configuration: No ODrive found")
             return False
 
         try:
             self.driver.save_configuration()
         except fibre.libfibre.ObjectLostError:
-            self.logger.error("Save ODrive configuration")
+            self.logger.info("Try to save ODrive configuration: Successful")
             self.driver = None
         except Exception as ex:
-            self.logger.error("Failed to save configuration due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
+            self.logger.error("Try to reboot ODrive: Failed to save configuration due to excpetion of %s. Argument: \n%s" %(type(ex).__name__, ex))
         finally:
             self.driver = None
             self.axes   = None
@@ -299,8 +290,8 @@ class ODriveInterface:
         if (not self.driver) or (not self.axes):
             return False
         
-        # self.axes[0].watchdog_feed()
-        # self.axes[1].watchdog_feed()
+        self.axes[0].watchdog_feed()
+        self.axes[1].watchdog_feed()
 
         return True
 
@@ -316,9 +307,6 @@ class ODriveInterface:
 
         self.axes[0].controller.input_vel = left_vel_rpm
         self.axes[1].controller.input_vel = right_vel_rpm
-
-        # self.logger.info(self.axes[0].controller.input_vel)
-        # self.logger.info(self.axes[1].controller.input_vel)
 
         return self.watchdog_feed()
 
@@ -580,9 +568,19 @@ class ODriveLivePlotter:
         self.fig.canvas.draw()
         self.fig.canvas.start_event_loop(1/self.plot_rate)
 
+
 if __name__ == "__main__":
 
-    driver = ODriveInterface()
+    default_logger = logging.getLogger(__name__)
+    default_logger.setLevel(logging.DEBUG)
+
+    # create console handler and set level to debug
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+
+    default_logger.addHandler(ch)
+
+    driver = ODriveInterface(logger=default_logger)
 
     while True:
         if driver.driver:

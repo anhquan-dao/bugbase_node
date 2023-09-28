@@ -1,9 +1,0 @@
-<launch>  
-  <rosparam command="load" file="$(find bugbase_node)/cfg/bugbase.yaml" />
-
-  <!-- <test test-name="test_weird_float" pkg="bugbase_node" type="test_weird_float.py" />
-  <test test-name="test_disconnect" pkg="bugbase_node" type="test_disconnect.py" /> -->
-  <!-- <test test-name="test_speed_profile" pkg="bugbase_node" type="test_speed_profile.py" /> -->
-
-
-</launch>
